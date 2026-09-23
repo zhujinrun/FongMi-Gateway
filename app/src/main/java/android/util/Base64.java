@@ -28,6 +28,15 @@ public class Base64 {
         }
     }
 
+    public static byte[] decode(byte[] input, int flags) {
+        if (input == null) return new byte[0];
+        return decode(new String(input, StandardCharsets.ISO_8859_1), flags);
+    }
+
+    public static byte[] decode(byte[] input) {
+        return decode(input, DEFAULT);
+    }
+
     public static String encodeToString(byte[] input, int flags) {
         if (input == null) return "";
         java.util.Base64.Encoder encoder;
