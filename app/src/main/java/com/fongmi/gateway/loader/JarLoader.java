@@ -193,7 +193,8 @@ public class JarLoader {
             Class<?> pe = loader.loadClass("com.github.catvod.spider.merge.Pe");
             String proxyKey = resolvePeProxyKey(loader);
             OkHttpClient client = com.github.catvod.net.OkHttp.client().newBuilder()
-                    .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
+                    // Do not force HTTP/1.1: seedog.cc returns 403 on HTTP/1.1 (CF), 200 on HTTP/2.
+                    // xl01 Origin fix above is sufficient for list pages.
                     .addInterceptor((Interceptor) chain -> {
                         Request req = chain.request();
                         String original = req.url().toString();
@@ -290,6 +291,10 @@ public class JarLoader {
     static String rewriteSpiderUrl(String url) {
         if (url == null || url.isEmpty()) return url;
         String s = url;
+        // seedhub.pro -> sidhub.cc -> seedog.cc (live domain)
+        if (s.contains("seedhub.pro") || s.contains("sidhub.cc")) {
+            s = s.replace("seedhub.pro", "seedog.cc").replace("sidhub.cc", "seedog.cc");
+        }
         int first = s.indexOf("://");
         if (first > 0) {
             int second = s.indexOf("://", first + 3);
