@@ -40,6 +40,9 @@ public class Main {
 
         if (quiet) System.setProperty("gateway.quiet", "true");
 
+        // spider uses AES/ECB/PKCS7Padding (BouncyCastle only; SunJCE has PKCS5Padding)
+        java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+
         if (!dataDir.exists()) dataDir.mkdirs();
         com.github.catvod.utils.Path.setRoot(dataDir);
         Context.setRootDir(dataDir);

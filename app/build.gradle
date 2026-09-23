@@ -17,6 +17,7 @@ dependencies {
     // Android-compatible org.json (getString coerces numbers like Android)
     implementation 'com.vaadin.external.google:android-json:0.0.20131108.vaadin1'
     implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
     implementation 'com.github.pxb1988:dex2jar:v2.4'
     runtimeOnly 'com.github.pxb1988.dex2jar:dex-tools:v2.4'
 }

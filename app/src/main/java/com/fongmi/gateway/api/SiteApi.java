@@ -38,6 +38,20 @@ public class SiteApi {
                     result.add("list", videoObj.get("list"));
                 }
             }
+            boolean hasList = result.has("list") && result.get("list").isJsonArray() && !result.getAsJsonArray("list").isEmpty();
+            if (!hasList) {
+                try {
+                    String cat = categoryContent(key, "0", "1", true, Map.of());
+                    if (Json.isObj(cat)) {
+                        JsonObject catObj = JsonParser.parseString(cat).getAsJsonObject();
+                        if (catObj.has("list") && catObj.get("list").isJsonArray() && !catObj.getAsJsonArray("list").isEmpty()) {
+                            result.add("list", catObj.get("list"));
+                        }
+                    }
+                } catch (Exception e) {
+                    SpiderDebug.log(e);
+                }
+            }
             result.addProperty("key", site.getKey());
             result.addProperty("siteName", site.getName());
             return result.toString();

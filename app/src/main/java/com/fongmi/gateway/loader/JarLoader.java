@@ -203,21 +203,26 @@ public class JarLoader {
                             HttpUrl parsed = HttpUrl.parse(fixed);
                             if (parsed != null) req = req.newBuilder().url(parsed).build();
                         }
-                        if (req.header("Referer") == null && req.url().host().contains("xl01")) {
-                            req = req.newBuilder().header("Referer", "https://v.xl01.eu.cc/").build();
+                        if (req.url().host().contains("xl01")) {
+                            String origin = req.header("Origin");
+                            if (origin == null || !origin.startsWith("http")) {
+                                req = req.newBuilder().header("Origin", "https://" + req.url().host()).build();
+                            }
+                            if (req.header("Referer") == null) {
+                                req = req.newBuilder().header("Referer", "https://" + req.url().host() + "/").build();
+                            }
+                            if (req.header("Accept") == null) {
+                                req = req.newBuilder().header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").build();
+                            }
                         } else {
                             String ref = req.header("Referer");
                             if (ref != null && ref.contains("://") && ref.indexOf("://", ref.indexOf("://") + 3) > 0) {
                                 int h = ref.lastIndexOf("http");
                                 if (h >= 0) req = req.newBuilder().header("Referer", ref.substring(h)).build();
                             }
-                        }
-                        String origin = req.header("Origin");
-                        if (origin != null && !origin.startsWith("http")) {
-                            req = req.newBuilder().header("Origin", "https://" + origin).build();
-                        }
-                        if (req.header("Accept") == null) {
-                            req = req.newBuilder().header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").build();
+                            if (req.header("Accept") == null) {
+                                req = req.newBuilder().header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").build();
+                            }
                         }
                         long t0 = System.currentTimeMillis();
                         okhttp3.Response resp;
