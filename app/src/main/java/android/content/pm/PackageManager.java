@@ -26,6 +26,18 @@ public class PackageManager {
         return info;
     }
 
+    public android.content.pm.ApplicationInfo getApplicationInfo(String packageName, int flags) throws NameNotFoundException {
+        if (packageName == null) throw new NameNotFoundException("null");
+        android.content.pm.ApplicationInfo info = new android.content.pm.ApplicationInfo();
+        info.packageName = packageName;
+        info.targetSdkVersion = 34;
+        info.minSdkVersion = 21;
+        info.flags = 1;
+        info.dataDir = System.getProperty("user.home");
+        info.sourceDir = "";
+        return info;
+    }
+
     public String[] getPackagesForUid(int uid) {
         return new String[]{"com.fongmi.gateway"};
     }
