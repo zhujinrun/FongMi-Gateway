@@ -1,0 +1,48 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:5.1.0'
+    implementation 'com.squareup.okhttp3:logging-interceptor:5.1.0'
+    implementation 'com.google.code.gson:gson:2.13.1'
+    implementation 'org.jsoup:jsoup:1.21.1'
+    // Android-compatible org.json (getString coerces numbers like Android)
+    implementation 'com.vaadin.external.google:android-json:0.0.20131108.vaadin1'
+    implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
+    implementation 'com.github.pxb1988:dex2jar:v2.4'
+    runtimeOnly 'com.github.pxb1988.dex2jar:dex-tools:v2.4'
+}
+
+application {
+    mainClass = 'com.fongmi.gateway.Main'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+tasks.register('fatJar', Jar) {
+    archiveBaseName = 'gateway'
+    archiveVersion = ''
+    archiveClassifier = ''
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': 'com.fongmi.gateway.Main'
+    }
+    from sourceSets.main.output
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    excludes = ['META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA']
+}
+
+tasks.named('build') {
+    dependsOn 'fatJar'
+}

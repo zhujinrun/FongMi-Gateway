@@ -1,0 +1,17 @@
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0' apply false
+}
+
+allprojects {
+    group = 'com.fongmi.gateway'
+    version = '0.1.0'
+}
+
+subprojects {
+    repositories {
+        mavenCentral()
+        maven { url = uri('https://jitpack.io') }
+        maven { url = uri('https://maven.aliyun.com/repository/public') }
+        maven { url = uri('https://maven.aliyun.com/repository/google') }
+    }
+}

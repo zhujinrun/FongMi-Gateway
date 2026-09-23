@@ -1,0 +1,34 @@
+# Gradle / Java
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+*.classpath
+*.project
+
+# Local config / secrets
+local.properties
+*.jks
+*.keystore
+*.secret
+.env
+.env.*
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data (if run from repo)
+cache/
+data1/
