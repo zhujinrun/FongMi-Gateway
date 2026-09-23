@@ -192,9 +192,13 @@ public class JarLoader {
         try {
             Class<?> pe = loader.loadClass("com.github.catvod.spider.merge.Pe");
             String proxyKey = resolvePeProxyKey(loader);
-            OkHttpClient client = com.github.catvod.net.OkHttp.client().newBuilder()
-                    // Do not force HTTP/1.1: seedog.cc returns 403 on HTTP/1.1 (CF), 200 on HTTP/2.
-                    // xl01 Origin fix above is sufficient for list pages.
+            OkHttpClient base = com.github.catvod.net.OkHttp.client();
+            // seedog/Cloudflare list pages need HTTP/2 (HTTP/1.1 => 403).
+            // 4kcz.com resets HTTP/2 streams mid-body; use HTTP/1.1 for those hosts.
+            OkHttpClient h1Only = base.newBuilder()
+                    .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
+                    .build();
+            OkHttpClient client = base.newBuilder()
                     .addInterceptor((Interceptor) chain -> {
                         Request req = chain.request();
                         String original = req.url().toString();
@@ -225,11 +229,29 @@ public class JarLoader {
                                 req = req.newBuilder().header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").build();
                             }
                         }
+                        String host = req.url().host();
+                        if (host.contains("4kcz") || host.contains("libvio")) {
+                            try {
+                                okhttp3.Response r = h1Only.newCall(req).execute();
+                                if (r.code() >= 400) {
+                                    System.err.println("[jar] http " + r.code() + " h1 " + req.url());
+                                }
+                                return r;
+                            } catch (java.io.IOException ex) {
+                                System.err.println("[jar] !!h1 " + req.url() + " -> " + ex);
+                                throw ex;
+                            }
+                        }
                         long t0 = System.currentTimeMillis();
                         okhttp3.Response resp;
                         try {
                             resp = chain.proceed(req);
                         } catch (Throwable ex) {
+                            String msg = String.valueOf(ex);
+                            if (msg.contains("StreamReset") || msg.contains("INTERNAL_ERROR")) {
+                                System.err.println("[jar] h2 reset, retry h1 " + req.url());
+                                return h1Only.newCall(req).execute();
+                            }
                             System.err.println("[jar] !! " + req.url() + " -> " + ex);
                             throw ex;
                         }
