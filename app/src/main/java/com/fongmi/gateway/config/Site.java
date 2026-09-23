@@ -52,7 +52,17 @@ public class Site {
     public static Site from(JsonElement element, String globalSpider) {
         Site site = new Site();
         try {
-            Site tmp = com.fongmi.gateway.GsonHolder.GSON.fromJson(element, Site.class);
+            JsonElement el = element;
+            // Gson cannot map JSON object/array into String ext — stringify first
+            if (element.isJsonObject()) {
+                com.google.gson.JsonObject o = element.getAsJsonObject();
+                if (o.has("ext") && !o.get("ext").isJsonPrimitive()) {
+                    o = o.deepCopy();
+                    o.addProperty("ext", o.get("ext").toString());
+                    el = o;
+                }
+            }
+            Site tmp = com.fongmi.gateway.GsonHolder.GSON.fromJson(el, Site.class);
             if (tmp != null) site = tmp;
         } catch (Exception e) {
             // keep defaults

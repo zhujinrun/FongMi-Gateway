@@ -41,7 +41,12 @@ public class SiteApi {
             boolean hasList = result.has("list") && result.get("list").isJsonArray() && !result.getAsJsonArray("list").isEmpty();
             if (!hasList) {
                 try {
-                    String cat = categoryContent(key, "0", "1", true, Map.of());
+                    String tid = "0";
+                    if (result.has("class") && result.get("class").isJsonArray() && result.getAsJsonArray("class").size() > 0) {
+                        JsonObject first = result.getAsJsonArray("class").get(0).getAsJsonObject();
+                        if (first.has("type_id")) tid = first.get("type_id").getAsString();
+                    }
+                    String cat = categoryContent(key, tid, "1", true, Map.of());
                     if (Json.isObj(cat)) {
                         JsonObject catObj = JsonParser.parseString(cat).getAsJsonObject();
                         if (catObj.has("list") && catObj.get("list").isJsonArray() && !catObj.getAsJsonArray("list").isEmpty()) {
