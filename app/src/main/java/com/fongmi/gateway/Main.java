@@ -40,6 +40,8 @@ public class Main {
 
         if (quiet) System.setProperty("gateway.quiet", "true");
 
+        com.github.catvod.Proxy.setPort(port);
+
         // spider uses AES/ECB/PKCS7Padding (BouncyCastle only; SunJCE has PKCS5Padding)
         java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
 
@@ -85,6 +87,7 @@ public class Main {
         System.out.println("  GET  /search?site=KEY&key=&pg=");
         System.out.println("  GET  /player?site=KEY&flag=&id=");
         System.out.println("  POST /rpc");
+        System.out.println("  POST /{siteKey}/init|home|category|detail|search|play  (Player catvod type8)");
 
         Thread.currentThread().join();
     }

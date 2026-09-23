@@ -1,12 +1,14 @@
 package com.github.catvod;
 
-import com.github.catvod.net.OkHttp;
-
 import java.util.Map;
 
 public class Proxy {
 
-    private static final int PORT = 9978;
+    private static volatile int PORT = 9979;
+
+    public static void setPort(int port) {
+        if (port > 0) PORT = port;
+    }
 
     public static String getUrl() {
         return "http://127.0.0.1:" + getPort() + "/proxy";

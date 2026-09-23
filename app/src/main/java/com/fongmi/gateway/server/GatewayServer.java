@@ -58,7 +58,17 @@ public class GatewayServer {
             String method = ex.getRequestMethod();
             String body = "POST".equalsIgnoreCase(method) ? readBody(ex) : "";
 
+            if ("OPTIONS".equalsIgnoreCase(method)) {
+                sendJson(ex, 204, "");
+                return;
+            }
+
             String response;
+            if (isCatvodPath(path)) {
+                response = handleCatvod(path, q, body);
+                sendJson(ex, 200, response);
+                return;
+            }
             switch (path) {
                 case "/health" -> response = ok(summary());
                 case "/config" -> response = handleConfig(q, body);
@@ -104,6 +114,76 @@ public class GatewayServer {
             long ms = System.currentTimeMillis() - start;
             if (ms > 500) System.err.println("[gateway] slow " + ms + "ms " + ex.getRequestURI());
         }
+    }
+
+    private static boolean isCatvodPath(String path) {
+        if (path == null) return false;
+        String[] p = path.split("/");
+        return p.length == 3 && !p[1].isEmpty() && switch (p[2]) {
+            case "init", "home", "category", "detail", "search", "play" -> true;
+            default -> false;
+        };
+    }
+
+    /** Player catvod[type8]: POST /{siteKey}/{init|home|category|detail|search|play} → raw TVBox JSON (no envelope). */
+    private String handleCatvod(String path, Map<String, String> q, String body) throws Exception {
+        String[] p = path.split("/");
+        String key = p[1];
+        String method = p[2];
+        JsonObject o = bodyJson(body);
+        try {
+            return switch (method) {
+                case "init" -> "{}";
+                case "home" -> SiteApi.homeContent(key);
+                case "category" -> {
+                    String tid = first(q.get("id"), q.get("tid"), str(o, "id", "tid", "typeId"));
+                    String pg = first(q.get("page"), q.get("pg"), str(o, "page", "pg"));
+                    Map<String, String> ext = catvodExt(o);
+                    boolean filter = !ext.isEmpty() || bool(q, body, "filter", false);
+                    yield SiteApi.categoryContent(key, tid, pg, filter, ext);
+                }
+                case "detail" -> SiteApi.detailContent(key, first(q.get("id"), q.get("ids"), str(o, "id", "ids")));
+                case "search" -> SiteApi.searchContent(key,
+                        first(q.get("wd"), q.get("key"), q.get("word"), str(o, "wd", "key", "word", "keyword")),
+                        bool(q, body, "quick", false),
+                        first(q.get("pg"), q.get("page"), str(o, "pg", "page")));
+                case "play" -> SiteApi.playerContent(key,
+                        first(q.get("flag"), str(o, "flag")),
+                        first(q.get("id"), q.get("url"), str(o, "id", "url")));
+                default -> throw new Exception("unknown catvod method: " + method);
+            };
+        } catch (Exception e) {
+            System.err.println("[gateway] catvod " + method + " site=" + key + " failed: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    private static Map<String, String> catvodExt(JsonObject o) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (String name : new String[]{"filters", "filter", "ext", "extend"}) {
+            if (!o.has(name)) continue;
+            var el = o.get(name);
+            if (el.isJsonObject()) {
+                el.getAsJsonObject().entrySet().forEach(e -> map.put(e.getKey(),
+                        e.getValue().isJsonPrimitive() ? e.getValue().getAsString() : e.getValue().toString()));
+            } else if (el.isJsonPrimitive()) {
+                String raw = el.getAsString();
+                if (raw != null && raw.trim().startsWith("{")) {
+                    try {
+                        JsonParser.parseString(raw).getAsJsonObject().entrySet().forEach(e -> map.put(e.getKey(),
+                                e.getValue().isJsonPrimitive() ? e.getValue().getAsString() : e.getValue().toString()));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
+        return map;
+    }
+
+    private static String first(String... values) {
+        if (values == null) return "";
+        for (String v : values) if (v != null && !v.isEmpty()) return v;
+        return "";
     }
 
     private String handleConfig(Map<String, String> q, String body) throws Exception {
@@ -180,9 +260,37 @@ public class GatewayServer {
         }
         Object[] result = BaseLoader.get().proxy(params);
         if (result == null || result.length < 3) return error("proxy empty");
-        byte[] data = (byte[]) result[0];
-        String contentType = result[1] == null ? "application/octet-stream" : String.valueOf(result[1]);
-        int code = result[2] == null ? 200 : Integer.parseInt(String.valueOf(result[2]));
+        // TV spider contract: [status, contentType, InputStream, headers?]
+        // legacy: [byte[], contentType, status]
+        int code;
+        String contentType;
+        byte[] data;
+        if (result[0] instanceof Integer) {
+            code = (Integer) result[0];
+            contentType = result[1] == null ? "application/octet-stream" : String.valueOf(result[1]);
+            Object bodyObj = result[2];
+            if (bodyObj instanceof java.io.InputStream in) {
+                data = in.readAllBytes();
+            } else if (bodyObj instanceof byte[] b) {
+                data = b;
+            } else if (bodyObj instanceof String s) {
+                data = s.getBytes(StandardCharsets.UTF_8);
+            } else {
+                return error("proxy body unsupported: " + (bodyObj == null ? "null" : bodyObj.getClass().getName()));
+            }
+            if (result.length > 3 && result[3] instanceof Map<?, ?> headers) {
+                for (Map.Entry<?, ?> e : headers.entrySet()) {
+                    if (e.getKey() != null && e.getValue() != null) {
+                        ex.getResponseHeaders().set(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+                    }
+                }
+            }
+        } else {
+            data = (byte[]) result[0];
+            contentType = result[1] == null ? "application/octet-stream" : String.valueOf(result[1]);
+            code = result[2] == null ? 200 : Integer.parseInt(String.valueOf(result[2]));
+        }
+        if (code < 100 || code > 599) code = 200;
         ex.getResponseHeaders().set("Content-Type", contentType);
         ex.sendResponseHeaders(code, data.length);
         try (OutputStream os = ex.getResponseBody()) {

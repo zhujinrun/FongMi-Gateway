@@ -185,7 +185,34 @@ public class JarLoader {
         } catch (Throwable e) {
             System.err.println("[jar] InitOrigin.setClass fail: " + e); if (e.getCause() != null) e.getCause().printStackTrace();
         }
+        syncProxyPort(loader);
         installPeUrlRewrite(loader);
+    }
+
+    /** Spider builds proxy URLs from ProxyOrigin.yq (default -1). Point it at this gateway. */
+    private void syncProxyPort(URLClassLoader loader) {
+        int port = com.github.catvod.Proxy.getPort();
+        try {
+            Class<?> clz = loader.loadClass("com.github.catvod.spider.ProxyOrigin");
+            try {
+                Method drive = clz.getDeclaredMethod("drivePort");
+                drive.setAccessible(true);
+                drive.invoke(null);
+            } catch (Throwable ignored) {
+            }
+            Field f = clz.getDeclaredField("yq");
+            f.setAccessible(true);
+            try {
+                Field modifiers = Field.class.getDeclaredField("modifiers");
+                modifiers.setAccessible(true);
+                modifiers.setInt(f, f.getModifiers() & ~Modifier.FINAL);
+            } catch (Throwable ignored) {
+            }
+            f.set(null, port);
+            System.err.println("[jar] ProxyOrigin.yq=" + port);
+        } catch (Throwable e) {
+            System.err.println("[jar] ProxyOrigin.yq sync fail: " + e);
+        }
     }
 
     private void installPeUrlRewrite(URLClassLoader loader) {
@@ -357,12 +384,15 @@ public class JarLoader {
     }
 
     private void invokeProxy(String key, URLClassLoader loader) {
-        try {
-            Class<?> clz = loader.loadClass("com.github.catvod.spider.Proxy");
-            Method method = clz.getMethod("proxy", Map.class);
-            methods.put(key, method);
-        } catch (Throwable e) {
-            // optional
+        for (String name : new String[]{"com.github.catvod.spider.ProxyOrigin", "com.github.catvod.spider.Proxy"}) {
+            try {
+                Class<?> clz = loader.loadClass(name);
+                Method method = clz.getMethod("proxy", Map.class);
+                methods.put(key, method);
+                System.err.println("[jar] proxy method from " + name);
+                return;
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -375,7 +405,7 @@ public class JarLoader {
                 URLClassLoader loader = loaders.get(jaKey);
                 if (loader == null) return new SpiderNull();
                 String simple = api.split("csp_")[1];
-                Class<?> clz = loader.loadClass("com.github.catvod.spider." + simple);
+                Class<?> clz = loadSpiderClass(loader, simple);
                 Spider spider = (Spider) clz.getDeclaredConstructor().newInstance();
                 spider.siteKey = key;
                 spider.init(android.app.Application.get(), ext);
@@ -390,6 +420,23 @@ public class JarLoader {
                 return nullSpider;
             }
         });
+    }
+
+    /** Config uses csp_*Guard; jar classes are often without the Guard suffix. */
+    private static Class<?> loadSpiderClass(URLClassLoader loader, String simple) throws ClassNotFoundException {
+        String[] candidates = simple.endsWith("Guard")
+                ? new String[]{simple, simple.substring(0, simple.length() - "Guard".length())}
+                : new String[]{simple};
+        ClassNotFoundException last = null;
+        for (String name : candidates) {
+            if (name.isEmpty()) continue;
+            try {
+                return loader.loadClass("com.github.catvod.spider." + name);
+            } catch (ClassNotFoundException e) {
+                last = e;
+            }
+        }
+        throw last != null ? last : new ClassNotFoundException(simple);
     }
 
     public Object[] proxy(Map<String, String> params) throws Exception {
