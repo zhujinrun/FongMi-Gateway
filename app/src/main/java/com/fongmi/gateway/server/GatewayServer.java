@@ -258,6 +258,11 @@ public class GatewayServer {
                 }
             }
         }
+        // Gateway-native raw forward (spider ProxyOrigin does not handle do=raw).
+        String doMode = params.get("do");
+        if ("raw".equals(doMode) || "file".equals(doMode) || "ts".equals(doMode)) {
+            return handleRawProxy(ex, params);
+        }
         Object[] result = BaseLoader.get().proxy(params);
         if (result == null || result.length < 3) return error("proxy empty");
         // TV spider contract: [status, contentType, InputStream, headers?]
@@ -291,12 +296,111 @@ public class GatewayServer {
             code = result[2] == null ? 200 : Integer.parseInt(String.valueOf(result[2]));
         }
         if (code < 100 || code > 599) code = 200;
+        // Rewrite HLS playlists so segments go through this gateway (headers/auth).
+        if (contentType != null && contentType.toLowerCase().contains("mpegurl")) {
+            data = rewriteM3u8(data, params);
+        } else if (data.length > 16 && data[0] == '#' && data[1] == 'E' && data[2] == 'X' && data[3] == 'T') {
+            data = rewriteM3u8(data, params);
+        }
         ex.getResponseHeaders().set("Content-Type", contentType);
         ex.sendResponseHeaders(code, data.length);
         try (OutputStream os = ex.getResponseBody()) {
             os.write(data);
         }
         return null;
+    }
+
+    /** Forward url with optional headers= (base64 or k:v;k:v). Used for HLS segments. */
+    private String handleRawProxy(HttpExchange ex, Map<String, String> params) throws Exception {
+        String target = params.get("url");
+        if (target == null || target.isEmpty()) return error("raw proxy missing url");
+        okhttp3.Request.Builder rb = new okhttp3.Request.Builder().url(target);
+        String headers = params.get("headers");
+        if (headers != null && !headers.isEmpty()) {
+            String decoded = headers;
+            try {
+                byte[] b = java.util.Base64.getDecoder().decode(headers.replaceAll("\\s", ""));
+                decoded = new String(b, StandardCharsets.UTF_8);
+            } catch (Exception ignored) {
+            }
+            // formats: "User-Agent:Lavf/57.83.100" or "ua=...;referer=..."
+            for (String part : decoded.split("[;\\n]")) {
+                int i = part.indexOf(':');
+                if (i < 0) i = part.indexOf('=');
+                if (i > 0) {
+                    String k = part.substring(0, i).trim();
+                    String v = part.substring(i + 1).trim();
+                    if (!k.isEmpty() && !v.isEmpty()) rb.header(k, v);
+                }
+            }
+        }
+        if (rb.build().header("User-Agent") == null) {
+            rb.header("User-Agent", "Mozilla/5.0");
+        }
+        try (okhttp3.Response res = com.github.catvod.net.OkHttp.client().newCall(rb.build()).execute()) {
+            okhttp3.ResponseBody body = res.body();
+            byte[] data = body == null ? new byte[0] : body.bytes();
+            String ct = res.header("Content-Type");
+            String path = target;
+            int qi = path.indexOf('?');
+            if (qi > 0) path = path.substring(0, qi);
+            if (ct == null || ct.isEmpty() || ct.contains("text/html") || ct.contains("json")) {
+                if (path.endsWith(".m3u8") || path.endsWith(".m3u")) ct = "application/vnd.apple.mpegURL";
+                else if (path.endsWith(".ts")) ct = "video/mp2t";
+                else if (path.endsWith(".aac")) ct = "audio/aac";
+                else if (path.endsWith(".mp4")) ct = "video/mp4";
+                else ct = "application/octet-stream";
+            }
+            int code = res.code();
+            if (code < 100 || code > 599) code = 200;
+            ex.getResponseHeaders().set("Content-Type", ct);
+            ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+            ex.sendResponseHeaders(code, data.length == 0 ? -1 : data.length);
+            if (data.length > 0) {
+                try (OutputStream os = ex.getResponseBody()) {
+                    os.write(data);
+                }
+            }
+            return null;
+        }
+    }
+
+    /** Point every segment URI back at /proxy?do=raw&url=... so UA/Referer headers apply. */
+    private byte[] rewriteM3u8(byte[] data, Map<String, String> params) {
+        try {
+            String text = new String(data, StandardCharsets.UTF_8);
+            String headers = params.getOrDefault("headers", "");
+            String self = "http://127.0.0.1:" + port + "/proxy";
+            StringBuilder out = new StringBuilder(text.length() + 256);
+            String[] lines = text.split("\n", -1);
+            for (int i = 0; i < lines.length; i++) {
+                String raw = lines[i];
+                String line = raw.strip();
+                if (line.isEmpty() || line.startsWith("#")) {
+                    out.append(raw);
+                } else {
+                    String abs = line;
+                    if (!line.startsWith("http://") && !line.startsWith("https://")) {
+                        String base = params.get("url");
+                        if (base != null && !base.isEmpty()) {
+                            try {
+                                abs = new java.net.URL(new java.net.URL(base), line).toString();
+                            } catch (Exception ignored) {
+                            }
+                        }
+                    }
+                    out.append(self).append("?do=raw&url=")
+                            .append(java.net.URLEncoder.encode(abs, StandardCharsets.UTF_8));
+                    if (!headers.isEmpty()) {
+                        out.append("&headers=").append(java.net.URLEncoder.encode(headers, StandardCharsets.UTF_8));
+                    }
+                }
+                if (i < lines.length - 1) out.append('\n');
+            }
+            return out.toString().getBytes(StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            return data;
+        }
     }
 
     private JsonObject summary() {
