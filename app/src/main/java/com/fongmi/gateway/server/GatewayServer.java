@@ -214,27 +214,27 @@ public class GatewayServer {
         }
 
         String spider = VodConfig.get().getSpider();
-        String useJar = spider;
-        if (!preloadSpider(spider)) {
-            if (spiderFallback == null || spiderFallback.isEmpty()) {
-                // conventional local jar next to data dir / known working path is NOT hardcoded;
-                // user must pass --spider or we throw
-            }
-            if (spiderFallback != null && !spiderFallback.isEmpty() && !spiderFallback.equals(spider)) {
-                System.err.println("[gateway] config spider failed, trying --spider fallback");
-                useJar = spiderFallback;
-                if (preloadSpider(useJar)) {
-                    // point all sites without their own jar at the working fallback
-                    VodConfig.get().setSpider(useJar);
-                    System.err.println("[gateway] using fallback spider: " + useJar);
-                    return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
-                }
-            }
-            System.err.println("[gateway] spider jar failed, restoring previous config");
-            restoreConfig(prevUrl, prevSpider, prevRaw, prevLoaded);
-            throw new Exception("spider jar failed to load (Android native/Dex or network): " + spider + "; previous config restored");
+        if (preloadSpider(spider)) {
+            return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
         }
-        return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
+
+        // Config JSON loaded OK — keep NEW sites. Only try to fix the spider jar.
+        String[] candidates = {spiderFallback, prevSpider};
+        for (String cand : candidates) {
+            if (cand == null || cand.isEmpty() || cand.equals(spider)) continue;
+            System.err.println("[gateway] config spider failed, trying fallback: " + cand);
+            if (preloadSpider(cand)) {
+                VodConfig.get().setSpider(cand);
+                System.err.println("[gateway] using fallback spider: " + cand);
+                return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
+            }
+        }
+
+        // No runnable jar: still return config so Player sync /sites works.
+        System.err.println("[gateway] no runnable spider jar; keeping new config (csp home will fail until --spider is set)");
+        JsonObject summary = GsonHolder.GSON.toJsonTree(VodConfig.get().summary()).getAsJsonObject();
+        summary.addProperty("spiderWarning", "spider jar not runnable on JVM; pass --spider <compatible.jar>");
+        return ok(summary);
     }
 
     private boolean preloadSpider(String spider) {
