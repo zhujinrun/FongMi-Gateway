@@ -21,8 +21,6 @@ public class BaseLoader {
 
     public void clear() {
         jarLoader.clear();
-        // reset jar-level native error on config reload
-        jarLoader.getError("__jar_native__");
     }
 
     public Spider getSpider(String key, String api, String ext, String jar) {
@@ -66,15 +64,11 @@ public class BaseLoader {
             String jaKey = Crypto.md5(String.valueOf(jar));
             e = jarLoader.getError(jaKey);
         }
-        if (e == null || e.isEmpty()) {
-            e = jarLoader.getError("__jar_native__");
-        }
         return e == null ? "" : e;
     }
 
     public boolean hasNativeError() {
-        String e = jarLoader.getError("__jar_native__");
-        return e != null && !e.isEmpty();
+        return false;
     }
 
     public String recent() {

@@ -97,13 +97,10 @@ public class Main {
                     com.fongmi.gateway.loader.BaseLoader.get().clear();
                     com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderUrl, true);
                     String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderUrl);
-                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
-                    boolean ok = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
-                    if (ok) {
+                    if (err == null || err.isEmpty()) {
                         System.out.println("[gateway] spider preloaded: " + spiderUrl);
                     } else {
-                        System.err.println("[gateway] spider preload failed (server still up): "
-                                + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
+                        System.err.println("[gateway] spider preload failed (server still up): " + err);
                     }
                 }
                 if (cfg != null && !cfg.isEmpty()) {
@@ -128,25 +125,23 @@ public class Main {
                 com.fongmi.gateway.loader.BaseLoader.get().clear();
                 com.fongmi.gateway.loader.BaseLoader.get().parseJar(spider, true);
                 String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spider);
-                String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
-                okSpider = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
+                okSpider = err == null || err.isEmpty();
                 if (okSpider) {
                     System.out.println("[gateway] spider jar preloaded: " + spider);
                 } else {
-                    System.err.println("[gateway] config spider failed: " + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
+                    System.err.println("[gateway] config spider failed: " + err);
                 }
             }
             if (!okSpider && spiderFallback != null && !spiderFallback.isEmpty()) {
                 com.fongmi.gateway.loader.BaseLoader.get().clear();
                 com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderFallback, true);
                 String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderFallback);
-                String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
-                if ((err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty())) {
+                if (err == null || err.isEmpty()) {
                     VodConfig.get().setSpider(spiderFallback);
                     System.out.println("[gateway] using --spider fallback: " + spiderFallback);
                     okSpider = true;
                 } else {
-                    System.err.println("[gateway] fallback spider also failed: " + nativeErr);
+                    System.err.println("[gateway] fallback spider also failed: " + err);
                 }
             }
             if (!okSpider) {

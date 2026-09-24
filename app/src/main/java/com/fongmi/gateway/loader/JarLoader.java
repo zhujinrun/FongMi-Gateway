@@ -129,7 +129,10 @@ public class JarLoader {
     private void load(String key, File file) throws Exception {
         File usable = ensureJvmClasses(file);
         URLClassLoader loader = new URLClassLoader(new URL[]{usable.toURI().toURL()}, JarLoader.class.getClassLoader());
-        invokeInit(loader);
+        String nativeErr = invokeInit(loader, key);
+        if (nativeErr != null && !nativeErr.isEmpty()) {
+            throw new Exception(nativeErr);
+        }
         invokeProxy(key, loader);
         loaders.put(key, loader);
     }
@@ -162,7 +165,9 @@ public class JarLoader {
         }
     }
 
-    private void invokeInit(URLClassLoader loader) {
+    /** Returns non-empty native/Dex failure message for this jar, or "" if ok / not applicable. */
+    private String invokeInit(URLClassLoader loader, String key) {
+        String nativeMsg = "";
         try {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
             // Set Application BEFORE init(): jar Init.init may resolve DexNative
@@ -196,8 +201,7 @@ public class JarLoader {
                         || (c.getMessage() != null && c.getMessage().contains("dalvik"))
                         || c instanceof UnsatisfiedLinkError
                         || c instanceof ExceptionInInitializerError) {
-                    errors.put("__jar_native__",
-                            "spider jar requires Android native/Dex (WEXGuard等)，桌面网关无法运行: " + c);
+                    nativeMsg = "spider jar requires Android native/Dex (WEXGuard等)，桌面网关无法运行: " + c;
                 }
             }
             try {
@@ -209,23 +213,42 @@ public class JarLoader {
             System.err.println("[jar] spider Init load fail: " + e);
             if (e.getCause() != null) e.getCause().printStackTrace();
         }
-        try {
-            Class<?> clz = loader.loadClass("com.github.catvod.spider.InitOrigin");
-            Method method = clz.getMethod("init", Context.class);
-            method.invoke(clz, android.app.Application.get());
-        } catch (Throwable e) {
-            System.err.println("[jar] InitOrigin.init fail: " + e); if (e.getCause() != null) e.getCause().printStackTrace();
+        if (nativeMsg.isEmpty()) {
+            try {
+                Class<?> clz = loader.loadClass("com.github.catvod.spider.InitOrigin");
+                Method method = clz.getMethod("init", Context.class);
+                method.invoke(clz, android.app.Application.get());
+            } catch (Throwable e) {
+                System.err.println("[jar] InitOrigin.init fail: " + e);
+                if (e.getCause() != null) e.getCause().printStackTrace();
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                if (c instanceof NoClassDefFoundError
+                        || String.valueOf(c.getMessage()).contains("dalvik")
+                        || c instanceof UnsatisfiedLinkError) {
+                    nativeMsg = "spider jar requires Android native/Dex (WEXGuard等)，桌面网关无法运行: " + c;
+                }
+            }
         }
-        try {
-            Class<?> clz = loader.loadClass("com.github.catvod.spider.InitOrigin");
-            Method method = clz.getMethod("setClass", Class.class);
-            method.invoke(clz, com.github.catvod.spider.SpiderCrypto.class);
-            System.err.println("[jar] InitOrigin.setClass ok");
-        } catch (Throwable e) {
-            System.err.println("[jar] InitOrigin.setClass fail: " + e); if (e.getCause() != null) e.getCause().printStackTrace();
+        if (nativeMsg.isEmpty()) {
+            try {
+                Class<?> clz = loader.loadClass("com.github.catvod.spider.InitOrigin");
+                Method method = clz.getMethod("setClass", Class.class);
+                method.invoke(clz, com.github.catvod.spider.SpiderCrypto.class);
+                System.err.println("[jar] InitOrigin.setClass ok");
+            } catch (Throwable e) {
+                System.err.println("[jar] InitOrigin.setClass fail: " + e);
+                if (e.getCause() != null) e.getCause().printStackTrace();
+            }
         }
-        syncProxyPort(loader);
-        installPeUrlRewrite(loader);
+        if (nativeMsg.isEmpty()) {
+            syncProxyPort(loader);
+            installPeUrlRewrite(loader);
+        }
+        if (!nativeMsg.isEmpty()) {
+            // scope to this jar key only — never a process-global poison pill
+            errors.put(key, nativeMsg);
+        }
+        return nativeMsg;
     }
 
     /** Spider builds proxy URLs from ProxyOrigin.yq (default -1). Point it at this gateway. */

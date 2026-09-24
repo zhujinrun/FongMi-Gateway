@@ -86,9 +86,11 @@ public class GatewayServer {
                         req(q, body, "pg", "page"),
                         bool(q, body, "filter", true),
                         ext(q, body))));
-                case "/detail" -> response = ok(single(SiteApi.detailContent(
-                        req(q, body, "site", "key"),
-                        req(q, body, "id", "ids"))));
+                case "/detail" -> {
+                    String did = req(q, body, "id", "ids");
+                    if (did == null || did.isEmpty()) response = ok("{\"list\":[]}");
+                    else response = ok(single(SiteApi.detailContent(req(q, body, "site", "key"), did)));
+                }
                 case "/search" -> response = ok(single(SiteApi.searchContent(
                         req(q, body, "site", "key"),
                         req(q, body, "key", "word", "wd", "keyword"),
@@ -148,7 +150,11 @@ public class GatewayServer {
                     boolean filter = !ext.isEmpty() || bool(q, body, "filter", false);
                     yield SiteApi.categoryContent(key, tid, pg, filter, ext);
                 }
-                case "detail" -> SiteApi.detailContent(key, first(q.get("id"), q.get("ids"), str(o, "id", "ids")));
+                case "detail" -> {
+                    String id = first(q.get("id"), q.get("ids"), str(o, "id", "ids"));
+                    if (id == null || id.isEmpty()) yield "{\"list\":[]}";
+                    yield SiteApi.detailContent(key, id);
+                }
                 case "search" -> SiteApi.searchContent(key,
                         first(q.get("wd"), q.get("key"), q.get("word"), str(o, "wd", "key", "word", "keyword")),
                         bool(q, body, "quick", false),
@@ -243,14 +249,10 @@ public class GatewayServer {
         try {
             BaseLoader.get().parseJar(spider, true);
             String err = BaseLoader.get().getError("", spider);
-            if (err != null && !err.isEmpty()) return false;
-            // native/Dex jar failure recorded under __jar_native__
-            String nativeErr = BaseLoader.get().getError("__jar_native__", "");
-            if (nativeErr != null && !nativeErr.isEmpty()) {
-                System.err.println("[gateway] spider native/dex not runnable on JVM: " + nativeErr);
+            if (err != null && !err.isEmpty()) {
+                System.err.println("[gateway] spider not runnable: " + err);
                 return false;
             }
-            // smoke: can we construct a spider? (catches Init/DexNative failures)
             return true;
         } catch (Exception e) {
             System.err.println("[gateway] preload spider failed: " + e.getMessage());
