@@ -18,6 +18,7 @@ public class Main {
         String token = "";
         File dataDir = new File(System.getProperty("user.home"), ".gateway");
         String configUrl = null;
+        String spiderFallback = "";
         boolean quiet = false;
 
         for (int i = 0; i < args.length; i++) {
@@ -27,6 +28,7 @@ public class Main {
                 case "--token" -> token = args[++i];
                 case "--data" -> dataDir = new File(args[++i]);
                 case "--config" -> configUrl = args[++i];
+                case "--spider" -> spiderFallback = args[++i];
                 case "--quiet" -> quiet = true;
                 case "--help", "-h" -> {
                     printHelp();
@@ -58,7 +60,7 @@ public class Main {
             System.out.println("[gateway] generated token for non-local bind");
         }
 
-        GatewayServer server = new GatewayServer(host, port, token);
+        GatewayServer server = new GatewayServer(host, port, token, spiderFallback);
         server.start();
 
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop));

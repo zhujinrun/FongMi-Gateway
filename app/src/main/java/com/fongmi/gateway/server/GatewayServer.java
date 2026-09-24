@@ -25,12 +25,18 @@ public class GatewayServer {
     private final String host;
     private final int port;
     private final String token;
+    private final String spiderFallback;
     private HttpServer server;
 
     public GatewayServer(String host, int port, String token) {
+        this(host, port, token, "");
+    }
+
+    public GatewayServer(String host, int port, String token, String spiderFallback) {
         this.host = host;
         this.port = port;
         this.token = token == null ? "" : token;
+        this.spiderFallback = spiderFallback == null ? "" : spiderFallback;
     }
 
     public void start() throws IOException {
@@ -194,30 +200,61 @@ public class GatewayServer {
             o.add("config", GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
             return ok(o);
         }
-        VodConfig.get().load(url);
-        BaseLoader.get().clear();
-        String spider = VodConfig.get().getSpider();
-        boolean ok = false;
-        if (!spider.isEmpty()) {
-            try {
-                BaseLoader.get().parseJar(spider, true);
-                String err = BaseLoader.get().getError("", spider);
-                ok = err == null || err.isEmpty();
-            } catch (Exception e) {
-                System.err.println("[gateway] preload spider failed: " + e.getMessage());
-                ok = false;
-            }
+
+        String prevUrl = VodConfig.get().getUrl();
+        String prevSpider = VodConfig.get().getSpider();
+        String prevRaw = VodConfig.get().getRawJson();
+        boolean prevLoaded = VodConfig.get().isLoaded();
+
+        try {
+            VodConfig.get().load(url);
+        } catch (Exception loadErr) {
+            restoreConfig(prevUrl, prevSpider, prevRaw, prevLoaded);
+            throw loadErr;
         }
-        if (!ok) {
-            String fallback = "file:///C:/Users/lxy/AppData/Local/Temp/gateway-test/cache/jar/spider_real.jar";
-            System.err.println("[gateway] spider preload failed, fallback local jar");
-            try {
-                BaseLoader.get().parseJar(fallback, true);
-            } catch (Exception e) {
-                System.err.println("[gateway] fallback jar failed: " + e.getMessage());
+
+        String spider = VodConfig.get().getSpider();
+        String useJar = spider;
+        if (!preloadSpider(spider)) {
+            if (spiderFallback != null && !spiderFallback.isEmpty() && !spiderFallback.equals(spider)) {
+                System.err.println("[gateway] config spider failed, trying --spider fallback");
+                useJar = spiderFallback;
+                if (preloadSpider(useJar)) {
+                    // keep new sites, use CLI fallback jar
+                    return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
+                }
             }
+            System.err.println("[gateway] spider jar failed, restoring previous config");
+            restoreConfig(prevUrl, prevSpider, prevRaw, prevLoaded);
+            throw new Exception("spider jar failed to load: " + spider + "; previous config restored");
         }
         return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
+    }
+
+    private boolean preloadSpider(String spider) {
+        if (spider == null || spider.isEmpty()) return false;
+        BaseLoader.get().clear();
+        try {
+            BaseLoader.get().parseJar(spider, true);
+            String err = BaseLoader.get().getError("", spider);
+            return err == null || err.isEmpty();
+        } catch (Exception e) {
+            System.err.println("[gateway] preload spider failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private void restoreConfig(String url, String spider, String raw, boolean loaded) {
+        try {
+            if (loaded && raw != null && !raw.isEmpty()) {
+                VodConfig.get().loadJson(raw, url == null || url.isEmpty() ? "http://localhost/" : url);
+            }
+            if (spider != null && !spider.isEmpty()) {
+                preloadSpider(spider);
+            }
+        } catch (Exception e) {
+            System.err.println("[gateway] restore previous config failed: " + e.getMessage());
+        }
     }
 
     private String handleRpc(Map<String, String> q, String body) throws Exception {
