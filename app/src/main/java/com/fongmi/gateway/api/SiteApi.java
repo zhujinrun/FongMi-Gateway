@@ -173,6 +173,11 @@ public class SiteApi {
     }
 
     private static Spider spider(Site site) throws Exception {
+        String nativeErr = BaseLoader.get().getError("__jar_native__", "");
+        if (nativeErr != null && !nativeErr.isEmpty()) {
+            site.setLoadFailed(true);
+            throw new Exception(nativeErr);
+        }
         Spider spider = BaseLoader.get().getSpider(site);
         String err = BaseLoader.get().getError(site.getKey(), site.getJar());
         if (err != null && !err.isEmpty()) {

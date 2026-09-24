@@ -21,6 +21,8 @@ public class BaseLoader {
 
     public void clear() {
         jarLoader.clear();
+        // reset jar-level native error on config reload
+        jarLoader.getError("__jar_native__");
     }
 
     public Spider getSpider(String key, String api, String ext, String jar) {

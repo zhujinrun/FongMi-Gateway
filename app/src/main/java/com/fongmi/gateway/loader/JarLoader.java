@@ -165,10 +165,49 @@ public class JarLoader {
     private void invokeInit(URLClassLoader loader) {
         try {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.Init");
-            Method method = clz.getMethod("init", Context.class);
-            method.invoke(clz, android.app.Application.get());
+            // Set Application BEFORE init(): jar Init.init may resolve DexNative
+            // (and DexNative.<clinit> needs context) during invoke, before putfield runs.
+            try {
+                Method get = clz.getMethod("get");
+                Object inst = get.invoke(null);
+                for (Field f : clz.getDeclaredFields()) {
+                    if (f.getType() == android.app.Application.class) {
+                        f.setAccessible(true);
+                        f.set(inst, android.app.Application.get());
+                        System.err.println("[jar] Init Application pre-set");
+                        break;
+                    }
+                }
+                Method ctx = clz.getMethod("context");
+                System.err.println("[jar] Init.context after preset=" + (ctx.invoke(null) != null));
+            } catch (Throwable e) {
+                System.err.println("[jar] Init Application preset fail: " + e);
+            }
+            try {
+                Method init = clz.getMethod("init", Context.class);
+                init.invoke(null, android.app.Application.get());
+                System.err.println("[jar] Init.init ok");
+            } catch (Throwable e) {
+                Throwable c = e.getCause() != null ? e.getCause() : e;
+                System.err.println("[jar] Init.init fail: " + c);
+                c.printStackTrace();
+                // WEXGuard/DexNative jars need Android DexClassLoader + .so — unusable on desktop JVM
+                if (c instanceof NoClassDefFoundError
+                        || (c.getMessage() != null && c.getMessage().contains("dalvik"))
+                        || c instanceof UnsatisfiedLinkError
+                        || c instanceof ExceptionInInitializerError) {
+                    errors.put("__jar_native__",
+                            "spider jar requires Android native/Dex (WEXGuard等)，桌面网关无法运行: " + c);
+                }
+            }
+            try {
+                Method ctx = clz.getMethod("context");
+                System.err.println("[jar] Init.context final=" + (ctx.invoke(null) != null));
+            } catch (Throwable ignored) {
+            }
         } catch (Throwable e) {
-            // optional
+            System.err.println("[jar] spider Init load fail: " + e);
+            if (e.getCause() != null) e.getCause().printStackTrace();
         }
         try {
             Class<?> clz = loader.loadClass("com.github.catvod.spider.InitOrigin");
