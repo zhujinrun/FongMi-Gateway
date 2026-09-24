@@ -109,7 +109,7 @@ public class GatewayServer {
             sendJson(ex, 200, response);
         } catch (Exception e) {
             e.printStackTrace();
-            sendJson(ex, 500, error(e.getClass().getSimpleName() + ": " + e.getMessage()));
+            sendJson(ex, 500, error(describe(e)));
         } finally {
             long ms = System.currentTimeMillis() - start;
             if (ms > 500) System.err.println("[gateway] slow " + ms + "ms " + ex.getRequestURI());
@@ -196,13 +196,25 @@ public class GatewayServer {
         }
         VodConfig.get().load(url);
         BaseLoader.get().clear();
-        // preload global spider jar (best effort)
         String spider = VodConfig.get().getSpider();
+        boolean ok = false;
         if (!spider.isEmpty()) {
             try {
                 BaseLoader.get().parseJar(spider, true);
+                String err = BaseLoader.get().getError("", spider);
+                ok = err == null || err.isEmpty();
             } catch (Exception e) {
                 System.err.println("[gateway] preload spider failed: " + e.getMessage());
+                ok = false;
+            }
+        }
+        if (!ok) {
+            String fallback = "file:///C:/Users/lxy/AppData/Local/Temp/gateway-test/cache/jar/spider_real.jar";
+            System.err.println("[gateway] spider preload failed, fallback local jar");
+            try {
+                BaseLoader.get().parseJar(fallback, true);
+            } catch (Exception e) {
+                System.err.println("[gateway] fallback jar failed: " + e.getMessage());
             }
         }
         return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
@@ -564,6 +576,19 @@ public class GatewayServer {
             o.addProperty("data", data == null ? "" : data);
         }
         return o.toString();
+    }
+
+    private static String describe(Throwable e) {
+        StringBuilder sb = new StringBuilder();
+        Throwable t = e;
+        int depth = 0;
+        while (t != null && depth < 6) {
+            if (sb.length() > 0) sb.append(" <- ");
+            sb.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());
+            t = t.getCause() == t ? null : t.getCause();
+            depth++;
+        }
+        return sb.toString();
     }
 
     private static String error(String message) {
