@@ -12,6 +12,9 @@ import java.security.SecureRandom;
 
 public class Main {
 
+    private static final String DEFAULT_SPIDER =
+            "https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar;md5;https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar.md5";
+
     public static void main(String[] args) throws Exception {
         String host = "127.0.0.1";
         int port = 9979;
@@ -60,49 +63,15 @@ public class Main {
             System.out.println("[gateway] generated token for non-local bind");
         }
 
+        // default spider when --spider not given
+        boolean spiderExplicit = spiderFallback != null && !spiderFallback.isEmpty();
+        if (!spiderExplicit) {
+            spiderFallback = DEFAULT_SPIDER;
+        }
+
         GatewayServer server = new GatewayServer(host, port, token, spiderFallback);
         server.start();
-
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop));
-
-        if (configUrl != null && !configUrl.isEmpty()) {
-            try {
-                VodConfig.get().load(configUrl);
-                String spider = VodConfig.get().getSpider();
-                boolean okSpider = false;
-                if (!spider.isEmpty()) {
-                    com.fongmi.gateway.loader.BaseLoader.get().clear();
-                    com.fongmi.gateway.loader.BaseLoader.get().parseJar(spider, true);
-                    String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spider);
-                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
-                    okSpider = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
-                    if (okSpider) {
-                        System.out.println("[gateway] spider jar preloaded: " + spider);
-                    } else {
-                        System.err.println("[gateway] config spider failed: " + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
-                    }
-                }
-                if (!okSpider && spiderFallback != null && !spiderFallback.isEmpty()) {
-                    com.fongmi.gateway.loader.BaseLoader.get().clear();
-                    com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderFallback, true);
-                    String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderFallback);
-                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
-                    if ((err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty())) {
-                        VodConfig.get().setSpider(spiderFallback);
-                        System.out.println("[gateway] using --spider fallback: " + spiderFallback);
-                        okSpider = true;
-                    } else {
-                        System.err.println("[gateway] fallback spider also failed: " + nativeErr);
-                    }
-                }
-                if (!okSpider) {
-                    System.err.println("[gateway] no runnable spider jar; csp sites will fail until --spider is set");
-                }
-                System.out.println("[gateway] config loaded: " + VodConfig.get().summary());
-            } catch (Exception e) {
-                System.err.println("[gateway] config load failed: " + e.getMessage());
-            }
-        }
 
         System.out.println("[gateway] ready. endpoints:");
         System.out.println("  GET  /health");
@@ -116,7 +85,77 @@ public class Main {
         System.out.println("  POST /rpc");
         System.out.println("  POST /{siteKey}/init|home|category|detail|search|play  (Player catvod type8)");
 
+        // spider download + optional config: background so failures never kill/ block main
+        final String spiderUrl = spiderFallback;
+        final String cfg = configUrl;
+        final File dataRoot = dataDir;
+        Thread preload = new Thread(() -> {
+            try {
+                if (spiderUrl != null && !spiderUrl.isEmpty()) {
+                    System.out.println("[gateway] preloading spider: " + spiderUrl);
+                    com.github.catvod.utils.Path.setRoot(dataRoot);
+                    com.fongmi.gateway.loader.BaseLoader.get().clear();
+                    com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderUrl, true);
+                    String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderUrl);
+                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
+                    boolean ok = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
+                    if (ok) {
+                        System.out.println("[gateway] spider preloaded: " + spiderUrl);
+                    } else {
+                        System.err.println("[gateway] spider preload failed (server still up): "
+                                + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
+                    }
+                }
+                if (cfg != null && !cfg.isEmpty()) {
+                    loadConfigWithSpiderFallback(cfg, spiderUrl);
+                }
+            } catch (Throwable t) {
+                System.err.println("[gateway] preload error (ignored): " + t);
+            }
+        }, "gateway-preload");
+        preload.setDaemon(true);
+        preload.start();
+
         Thread.currentThread().join();
+    }
+
+    private static void loadConfigWithSpiderFallback(String configUrl, String spiderFallback) {
+        try {
+            VodConfig.get().load(configUrl);
+            String spider = VodConfig.get().getSpider();
+            boolean okSpider = false;
+            if (spider != null && !spider.isEmpty()) {
+                com.fongmi.gateway.loader.BaseLoader.get().clear();
+                com.fongmi.gateway.loader.BaseLoader.get().parseJar(spider, true);
+                String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spider);
+                String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
+                okSpider = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
+                if (okSpider) {
+                    System.out.println("[gateway] spider jar preloaded: " + spider);
+                } else {
+                    System.err.println("[gateway] config spider failed: " + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
+                }
+            }
+            if (!okSpider && spiderFallback != null && !spiderFallback.isEmpty()) {
+                com.fongmi.gateway.loader.BaseLoader.get().clear();
+                com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderFallback, true);
+                String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderFallback);
+                String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
+                if ((err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty())) {
+                    VodConfig.get().setSpider(spiderFallback);
+                    System.out.println("[gateway] using --spider fallback: " + spiderFallback);
+                    okSpider = true;
+                } else {
+                    System.err.println("[gateway] fallback spider also failed: " + nativeErr);
+                }
+            }
+            if (!okSpider) {
+                System.err.println("[gateway] no runnable spider jar; csp sites will fail until --spider is set");
+            }
+            System.out.println("[gateway] config loaded: " + VodConfig.get().summary());
+        } catch (Throwable t) {
+            System.err.println("[gateway] config load failed (ignored): " + t);
+        }
     }
 
     private static String randomToken() {
@@ -138,6 +177,7 @@ public class Main {
                   --data <dir>      data directory (default ~/.gateway)
                   --config <url>    preload config
                   --spider <url>    fallback spider jar if config spider fails
+                                    (default: gh-proxy spider_real.jar with md5)
                   --quiet           reduce logs
                 """);
     }
