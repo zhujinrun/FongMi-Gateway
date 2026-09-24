@@ -409,11 +409,12 @@ public class JarLoader {
                 Spider spider = (Spider) clz.getDeclaredConstructor().newInstance();
                 spider.siteKey = key;
                 spider.init(android.app.Application.get(), ext);
+                errors.remove(key);
                 return spider;
             } catch (Throwable e) {
                 e.printStackTrace();
                 System.err.println("[jar] spider fail key=" + key + " api=" + api + " -> " + e);
-                errors.put(jaKey, e.getClass().getSimpleName() + ": " + e.getMessage());
+                // per-site only: do not poison shared jar md5 key used by every site
                 errors.put(key, e.getClass().getSimpleName() + ": " + e.getMessage());
                 SpiderNull nullSpider = new SpiderNull();
                 nullSpider.siteKey = key;

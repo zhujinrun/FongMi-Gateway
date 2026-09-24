@@ -58,9 +58,12 @@ public class BaseLoader {
     }
 
     public String getError(String key, String jar) {
-        String jaKey = Crypto.md5(String.valueOf(jar));
-        String e = jarLoader.getError(jaKey);
-        if (e == null || e.isEmpty()) e = jarLoader.getError(key);
+        // site key first; jar md5 only for parse/load failures, not single-class failures
+        String e = jarLoader.getError(key);
+        if (e == null || e.isEmpty()) {
+            String jaKey = Crypto.md5(String.valueOf(jar));
+            e = jarLoader.getError(jaKey);
+        }
         return e == null ? "" : e;
     }
 
