@@ -153,6 +153,14 @@ public class VodConfig {
         return spider;
     }
 
+    /** Override global spider jar for all sites that don't set their own jar. */
+    public synchronized void setSpider(String value) {
+        this.spider = value == null ? "" : value;
+        for (Site s : sites) {
+            s.setGlobalSpider(this.spider);
+        }
+    }
+
     public String getWallpaper() {
         return wallpaper;
     }

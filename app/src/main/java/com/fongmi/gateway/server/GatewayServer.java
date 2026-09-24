@@ -216,17 +216,23 @@ public class GatewayServer {
         String spider = VodConfig.get().getSpider();
         String useJar = spider;
         if (!preloadSpider(spider)) {
+            if (spiderFallback == null || spiderFallback.isEmpty()) {
+                // conventional local jar next to data dir / known working path is NOT hardcoded;
+                // user must pass --spider or we throw
+            }
             if (spiderFallback != null && !spiderFallback.isEmpty() && !spiderFallback.equals(spider)) {
                 System.err.println("[gateway] config spider failed, trying --spider fallback");
                 useJar = spiderFallback;
                 if (preloadSpider(useJar)) {
-                    // keep new sites, use CLI fallback jar
+                    // point all sites without their own jar at the working fallback
+                    VodConfig.get().setSpider(useJar);
+                    System.err.println("[gateway] using fallback spider: " + useJar);
                     return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
                 }
             }
             System.err.println("[gateway] spider jar failed, restoring previous config");
             restoreConfig(prevUrl, prevSpider, prevRaw, prevLoaded);
-            throw new Exception("spider jar failed to load: " + spider + "; previous config restored");
+            throw new Exception("spider jar failed to load (Android native/Dex or network): " + spider + "; previous config restored");
         }
         return ok(GsonHolder.GSON.toJsonTree(VodConfig.get().summary()));
     }
@@ -237,7 +243,15 @@ public class GatewayServer {
         try {
             BaseLoader.get().parseJar(spider, true);
             String err = BaseLoader.get().getError("", spider);
-            return err == null || err.isEmpty();
+            if (err != null && !err.isEmpty()) return false;
+            // native/Dex jar failure recorded under __jar_native__
+            String nativeErr = BaseLoader.get().getError("__jar_native__", "");
+            if (nativeErr != null && !nativeErr.isEmpty()) {
+                System.err.println("[gateway] spider native/dex not runnable on JVM: " + nativeErr);
+                return false;
+            }
+            // smoke: can we construct a spider? (catches Init/DexNative failures)
+            return true;
         } catch (Exception e) {
             System.err.println("[gateway] preload spider failed: " + e.getMessage());
             return false;

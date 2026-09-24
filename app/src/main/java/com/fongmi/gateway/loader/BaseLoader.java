@@ -66,7 +66,15 @@ public class BaseLoader {
             String jaKey = Crypto.md5(String.valueOf(jar));
             e = jarLoader.getError(jaKey);
         }
+        if (e == null || e.isEmpty()) {
+            e = jarLoader.getError("__jar_native__");
+        }
         return e == null ? "" : e;
+    }
+
+    public boolean hasNativeError() {
+        String e = jarLoader.getError("__jar_native__");
+        return e != null && !e.isEmpty();
     }
 
     public String recent() {

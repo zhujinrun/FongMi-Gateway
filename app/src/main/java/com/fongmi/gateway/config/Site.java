@@ -110,6 +110,10 @@ public class Site {
         return globalSpider;
     }
 
+    public void setGlobalSpider(String spider) {
+        this.globalSpider = spider == null ? "" : spider;
+    }
+
     public Integer getType() {
         return type == null ? 0 : type;
     }

@@ -68,12 +68,37 @@ public class Main {
         if (configUrl != null && !configUrl.isEmpty()) {
             try {
                 VodConfig.get().load(configUrl);
-                System.out.println("[gateway] config loaded: " + VodConfig.get().summary());
                 String spider = VodConfig.get().getSpider();
+                boolean okSpider = false;
                 if (!spider.isEmpty()) {
+                    com.fongmi.gateway.loader.BaseLoader.get().clear();
                     com.fongmi.gateway.loader.BaseLoader.get().parseJar(spider, true);
-                    System.out.println("[gateway] spider jar preloaded");
+                    String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spider);
+                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
+                    okSpider = (err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty());
+                    if (okSpider) {
+                        System.out.println("[gateway] spider jar preloaded: " + spider);
+                    } else {
+                        System.err.println("[gateway] config spider failed: " + (nativeErr != null && !nativeErr.isEmpty() ? nativeErr : err));
+                    }
                 }
+                if (!okSpider && spiderFallback != null && !spiderFallback.isEmpty()) {
+                    com.fongmi.gateway.loader.BaseLoader.get().clear();
+                    com.fongmi.gateway.loader.BaseLoader.get().parseJar(spiderFallback, true);
+                    String err = com.fongmi.gateway.loader.BaseLoader.get().getError("", spiderFallback);
+                    String nativeErr = com.fongmi.gateway.loader.BaseLoader.get().getError("__jar_native__", "");
+                    if ((err == null || err.isEmpty()) && (nativeErr == null || nativeErr.isEmpty())) {
+                        VodConfig.get().setSpider(spiderFallback);
+                        System.out.println("[gateway] using --spider fallback: " + spiderFallback);
+                        okSpider = true;
+                    } else {
+                        System.err.println("[gateway] fallback spider also failed: " + nativeErr);
+                    }
+                }
+                if (!okSpider) {
+                    System.err.println("[gateway] no runnable spider jar; csp sites will fail until --spider is set");
+                }
+                System.out.println("[gateway] config loaded: " + VodConfig.get().summary());
             } catch (Exception e) {
                 System.err.println("[gateway] config load failed: " + e.getMessage());
             }
