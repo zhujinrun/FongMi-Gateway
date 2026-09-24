@@ -112,6 +112,7 @@ public class Main {
                   --token <t>       required X-Gateway-Token (auto if non-local)
                   --data <dir>      data directory (default ~/.gateway)
                   --config <url>    preload config
+                  --spider <url>    fallback spider jar if config spider fails
                   --quiet           reduce logs
                 """);
     }
