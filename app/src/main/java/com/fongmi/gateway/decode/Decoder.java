@@ -19,6 +19,7 @@ public class Decoder {
 
     private static final Pattern JS_URI = Pattern.compile("\"(\\.|\\.\\.)/(.?|.+?)\\.js\\?(.?|.+?)\"");
     private static final Pattern STAR = Pattern.compile("[A-Za-z0-9]{8}\\*\\*");
+    private static final Pattern B64_RUN = Pattern.compile("[A-Za-z0-9+/=]{32,}");
 
     private static final OkHttpClient CLIENT = new OkHttpClient.Builder().followRedirects(true).build();
 
@@ -51,12 +52,32 @@ public class Decoder {
     public static String verify(String url, String data) throws Exception {
         if (data == null || data.isEmpty()) throw new Exception("empty config");
         if (Json.isObj(data)) return fix(url, data);
+        String unwrapped = unwrap(data);
+        if (unwrapped != null) data = unwrapped;
         if (data.contains("**")) data = base64(data);
         if (data.startsWith("2423")) data = cbc(data.replaceAll("\\s+", ""));
         if (!Json.isObj(data) && data.contains("**")) {
             data = base64(data);
         }
+        if (!Json.isObj(data)) {
+            unwrapped = unwrap(data);
+            if (unwrapped != null) data = unwrapped;
+        }
         return fix(url, data);
+    }
+
+    /** 饭太硬 style config: base64 JSON appended after a binary (JPEG) header. */
+    private static String unwrap(String data) {
+        Matcher matcher = B64_RUN.matcher(data);
+        while (matcher.find()) {
+            String text = matcher.group();
+            try {
+                String dec = new String(java.util.Base64.getDecoder().decode(text), StandardCharsets.UTF_8).trim();
+                if (Json.isObj(dec)) return dec;
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
     }
 
     private static String fix(String url, String data) {
