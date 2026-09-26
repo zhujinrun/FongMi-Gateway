@@ -32,15 +32,22 @@ java -jar app\build\libs\gateway.jar [选项]
 
 ### 默认 spider
 
-未指定 `--spider` 时，自动预下载（含 md5 校验）：
+未指定 `--spider` 时，自动预下载**两个** jar（含 md5 校验，`|` 连成池）：
 
 ```text
-https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar
-  ;md5;
-https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar.md5
+https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/fty_spider.jar
+  ;md5; .../jar/fty_spider.jar.md5
+|https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/wex_spider.jar
+  ;md5; .../jar/wex_spider.jar.md5
 ```
 
+- **fty 池**：饭太硬等 FongMi/JVM 类 spider（原 `spider_real.jar` 的后继，仓库 `jar/fty_spider.jar`）。
+- **wex 池**：王二小/WEXGuard 解壳 spider（仓库 `jar/wex_spider.jar`）。
+- 池内两个 jar 都会下载并常驻；站点 `csp_XxxGuard` 类按池顺序在各 jar 中查找（含 Guard 后缀回退），**任一配置源裸启动即可用**，无需手工 `--spider`。
+
 配置自带的远程 jar 若是 Android 原生壳，会自动回退到 `--spider` / 上述默认 jar；**下载失败只打日志，网关进程不退出**。
+
+github / gh-proxy 链接自动多镜像回退：按「原始链接 → gh-proxy.org → ghfast.top → ghproxy.net → gh-proxy.com → mirror.ghproxy.com → gitdl.cn → github.moeyy.xyz → github 直连」顺序逐个尝试，md5 文件同样走镜像；命中非首个镜像时日志输出 `[jar] loaded via mirror:`。
 
 ### 场景 1：只起网关，稍后在 Player 里同步配置
 
@@ -74,7 +81,12 @@ java -jar app\build\libs\gateway.jar --port 9979 `
   --spider "https://example.com/spider.jar;md5;https://example.com/spider.jar.md5"
 ```
 
-`--spider` 支持 `file:///`、`http(s)://`、`;md5;<32位hex>`、`;md5;<md5文件URL>`。
+`--spider` 支持 `file:///`、`http(s)://`、`;md5;<32位hex>`、`;md5;<md5文件URL>`、`|` 连接的多 jar 池（全部尝试加载，站点类按序在各 jar 中查找）：
+
+```powershell
+java -jar app\build\libs\gateway.jar --port 9979 `
+  --spider "file:///E:/code/AndroidProjects/FengMi/fty_spider_real.jar|file:///E:/code/AndroidProjects/FengMi/wex_spider_decoded.jar"
+```
 
 ### 运行后自检
 

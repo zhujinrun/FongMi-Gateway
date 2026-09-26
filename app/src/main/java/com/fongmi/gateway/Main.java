@@ -12,8 +12,10 @@ import java.security.SecureRandom;
 
 public class Main {
 
+    private static final String REPO = "https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/";
     private static final String DEFAULT_SPIDER =
-            "https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar;md5;https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/spider_real.jar.md5";
+            REPO + "fty_spider.jar;md5;" + REPO + "fty_spider.jar.md5"
+                    + "|" + REPO + "wex_spider.jar;md5;" + REPO + "wex_spider.jar.md5";
 
     public static void main(String[] args) throws Exception {
         String host = "127.0.0.1";
@@ -172,7 +174,10 @@ public class Main {
                   --data <dir>      data directory (default ~/.gateway)
                   --config <url>    preload config
                   --spider <url>    fallback spider jar if config spider fails
-                                    (default: gh-proxy spider_real.jar with md5)
+                                    (default: fty_spider.jar + wex_spider.jar from
+                                    this repo, both downloaded with md5; github links
+                                    auto-retry mirrors; '|' joins multiple jars into
+                                    a pool, class lookup tries each in order)
                   --quiet           reduce logs
                 """);
     }

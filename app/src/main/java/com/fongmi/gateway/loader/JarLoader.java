@@ -16,6 +16,10 @@ import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.zip.ZipEntry;
@@ -27,6 +31,19 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 
 public class JarLoader {
+
+    /** gh-proxy style mirrors tried in order when a github link fails. */
+    private static final String[] MIRRORS = {
+            "https://gh-proxy.org/",
+            "https://ghfast.top/",
+            "https://ghproxy.net/",
+            "https://gh-proxy.com/",
+            "https://mirror.ghproxy.com/",
+            "https://gitdl.cn/",
+            "https://github.moeyy.xyz/",
+            "https://ghproxy.cc/",
+            "https://gh.llkk.cc/",
+    };
 
     private final ConcurrentHashMap<String, URLClassLoader> loaders = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Method> methods = new ConcurrentHashMap<>();
@@ -70,47 +87,120 @@ public class JarLoader {
         Object lock = locks.computeIfAbsent(key, k -> new Object());
         synchronized (lock) {
             if (loaders.containsKey(key)) return;
-            try {
-                String[] texts = jar.split(";md5;");
-                String md5 = texts.length > 1 ? texts[1].trim() : "";
-                if (md5.startsWith("http")) {
-                    md5 = fetchText(md5);
+            String[] parts = jar.split("\\|");
+            boolean anyOk = false;
+            Exception last = null;
+            for (String raw : parts) {
+                String part = raw.trim();
+                if (part.isEmpty()) continue;
+                String partKey = Crypto.md5(part);
+                if (loaders.containsKey(partKey)) {
+                    anyOk = true;
+                    continue;
                 }
-                String jarUrl = texts[0].trim();
-                File file;
-                if (!md5.isEmpty()) {
-                    String cacheName = Crypto.md5(jarUrl);
-                    File cached = Path.jar(cacheName);
-                    if (Path.exists(cached) && Crypto.equals(cached, md5)) {
-                        file = cached;
-                    } else if (jarUrl.startsWith("http")) {
-                        file = download(jarUrl, cached);
-                    } else {
-                        file = new File(jarUrl.replace("file://", ""));
-                    }
-                } else if (jarUrl.startsWith("http")) {
-                    file = download(jarUrl, Path.jar(Crypto.md5(jarUrl)));
-                } else if (jarUrl.startsWith("file")) {
-                    file = new File(jarUrl.substring("file://".length()));
-                } else {
-                    file = new File(jarUrl.replace("file://", ""));
+                try {
+                    parsePart(part, partKey);
+                    anyOk = true;
+                    if (parts.length > 1) System.err.println("[jar] loaded part: " + part);
+                } catch (Throwable e) {
+                    last = e instanceof Exception ex ? ex : new Exception(e);
+                    System.err.println("[jar] candidate fail: " + part + " -> " + e);
                 }
-                if (!Path.exists(file)) throw new Exception("jar not found: " + jarUrl);
-                load(key, file);
+            }
+            if (anyOk) {
                 errors.remove(key);
-            } catch (Throwable e) {
+                errors.remove(Crypto.md5(String.valueOf(jar)));
+            } else {
+                Throwable e = last == null ? new Exception("no spider candidate: " + jar) : last;
                 e.printStackTrace();
                 System.err.println("[jar] load fail key=" + key + " jar=" + jar + " -> " + e);
-                errors.put(key, e.getClass().getSimpleName() + ": " + e.getMessage());
-                errors.put(Crypto.md5(String.valueOf(jar)), e.getClass().getSimpleName() + ": " + e.getMessage());
+                String msg = e.getClass().getSimpleName() + ": " + e.getMessage();
+                errors.put(key, msg);
+                errors.put(Crypto.md5(String.valueOf(jar)), msg);
             }
         }
     }
 
+    private void parsePart(String part, String partKey) throws Exception {
+        String[] texts = part.split(";md5;");
+        String spec = texts.length > 1 ? texts[1].trim() : "";
+        String md5 = spec.startsWith("http") ? fetchText(spec) : spec;
+        if (!md5.isEmpty() && !md5.matches("(?i)[0-9a-f]{32}")) {
+            System.err.println("[jar] invalid md5 (ignored): " + md5.substring(0, Math.min(60, md5.length())));
+            md5 = "";
+        }
+        String jarUrl = texts[0].trim();
+        Exception last = null;
+        for (String cand : expand(jarUrl)) {
+            try {
+                File file = resolveFile(cand, md5);
+                if (!Path.exists(file)) throw new Exception("jar not found: " + cand);
+                load(partKey, file);
+                errors.remove(partKey);
+                if (!cand.equals(jarUrl)) System.err.println("[jar] loaded via mirror: " + cand);
+                return;
+            } catch (Throwable e) {
+                last = e instanceof Exception ex ? ex : new Exception(e);
+                System.err.println("[jar] candidate fail: " + cand + " -> " + e);
+            }
+        }
+        throw last == null ? new Exception("jar not found: " + jarUrl) : last;
+    }
+
+    private File resolveFile(String jarUrl, String md5) throws Exception {
+        if (!md5.isEmpty()) {
+            String cacheName = Crypto.md5(jarUrl);
+            File cached = Path.jar(cacheName);
+            if (Path.exists(cached) && Crypto.equals(cached, md5)) return cached;
+            File file;
+            if (jarUrl.startsWith("http")) {
+                file = download(jarUrl, cached);
+            } else {
+                file = new File(jarUrl.replace("file://", ""));
+            }
+            if (!Path.exists(file)) throw new Exception("jar not found: " + jarUrl);
+            if (!Crypto.equals(file, md5)) {
+                if (file.equals(cached)) file.delete();
+                throw new Exception("md5 mismatch: " + jarUrl);
+            }
+            return file;
+        }
+        if (jarUrl.startsWith("http")) return download(jarUrl, Path.jar(Crypto.md5(jarUrl)));
+        if (jarUrl.startsWith("file")) return new File(jarUrl.substring("file://".length()));
+        return new File(jarUrl.replace("file://", ""));
+    }
+
+    /** github / gh-proxy style links: try original first, then other mirrors, direct github last. */
+    static List<String> expand(String url) {
+        String inner = null;
+        if (url.startsWith("https://github.com/") || url.startsWith("https://raw.githubusercontent.com/")) {
+            inner = url;
+        } else {
+            for (String host : new String[]{"https://github.com/", "https://raw.githubusercontent.com/"}) {
+                int idx = url.indexOf(host);
+                if (idx > 0 && url.substring(0, idx).matches("https://[^/]+/")) {
+                    inner = url.substring(idx);
+                    break;
+                }
+            }
+        }
+        if (inner == null) return Collections.singletonList(url);
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        out.add(url);
+        for (String m : MIRRORS) out.add(m + inner);
+        out.add(inner);
+        return new ArrayList<>(out);
+    }
+
     private String fetchText(String url) {
-        try (var res = com.github.catvod.net.OkHttp.newCall(url).execute()) {
-            if (res.body() != null) return res.body().string().trim();
-        } catch (Exception ignored) {
+        for (String cand : expand(url)) {
+            try (var res = com.github.catvod.net.OkHttp.newCall(cand).execute()) {
+                if (res.body() != null) {
+                    String text = res.body().string().trim();
+                    if (!text.isEmpty()) return text;
+                }
+            } catch (Exception ignored) {
+            }
         }
         return "";
     }
@@ -464,10 +554,20 @@ public class JarLoader {
         return spiders.computeIfAbsent(spKey, k -> {
             try {
                 parseJar(jaKey, jar);
-                URLClassLoader loader = loaders.get(jaKey);
-                if (loader == null) return new SpiderNull();
                 String simple = api.split("csp_")[1];
-                Class<?> clz = loadSpiderClass(loader, simple);
+                Class<?> clz = null;
+                for (String raw : String.valueOf(jar).split("\\|")) {
+                    String part = raw.trim();
+                    if (part.isEmpty()) continue;
+                    URLClassLoader loader = loaders.get(Crypto.md5(part));
+                    if (loader == null) continue;
+                    try {
+                        clz = loadSpiderClass(loader, simple);
+                        break;
+                    } catch (ClassNotFoundException ignored) {
+                    }
+                }
+                if (clz == null) throw new ClassNotFoundException("spider class not found in any jar of pool: " + simple);
                 Spider spider = (Spider) clz.getDeclaredConstructor().newInstance();
                 spider.siteKey = key;
                 spider.init(android.app.Application.get(), ext);
