@@ -63,7 +63,7 @@ spider 用默认网络 jar；配置自带 spider 失败时自动兜底。
 ```powershell
 java -jar app\build\libs\gateway.jar --port 9979 `
   --config "http://fty.xxooo.cf/tv" `
-  --spider "file:///E:/code/AndroidProjects/FengMi/Gateway/spider_real.jar"
+  --spider "file:///E:/code/AndroidProjects/FengMi/fty_spider_real.jar"
 ```
 
 ### 场景 4：自定义网络 spider + md5
