@@ -32,4 +32,6 @@ public class ProgressDialog extends AlertDialog {
         dialog.show();
         return dialog;
     }
+
+    public void setProgressStyle(int p0) {}
 }

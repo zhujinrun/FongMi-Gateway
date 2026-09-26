@@ -83,4 +83,10 @@ public class Activity extends Context {
 
     protected void onSaveInstanceState(android.os.Bundle outState) {
     }
+
+    public int checkSelfPermission(java.lang.String p0) { return 0; }
+    public android.view.WindowManager getWindowManager() { return null; }
+    public boolean isDestroyed() { return false; }
+    public boolean isFinishing() { return false; }
+    public void requestPermissions(java.lang.String[] p0, int p1) {}
 }

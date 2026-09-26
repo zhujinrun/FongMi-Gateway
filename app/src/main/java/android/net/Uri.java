@@ -220,4 +220,7 @@ public class Uri {
     public int hashCode() {
         return raw.hashCode();
     }
+
+    public java.lang.String getAuthority() { return null; }
+    public java.util.List getPathSegments() { return null; }
 }

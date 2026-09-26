@@ -20,4 +20,6 @@ public class Looper {
 
     public static void loop() {
     }
+
+    public java.lang.Thread getThread() { return null; }
 }

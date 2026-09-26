@@ -18,4 +18,6 @@ public class Formatter {
     public static String formatShortFileSize(android.content.Context context, long sizeBytes, int precision) {
         return formatShortFileSize(context, sizeBytes);
     }
+
+    public static java.lang.String formatIpAddress(int p0) { return null; }
 }

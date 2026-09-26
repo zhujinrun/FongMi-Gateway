@@ -16,4 +16,6 @@ public class Process {
 
     public static void killProcessGroup(int uid, int pid) {
     }
+
+    public static void setThreadPriority(int p0) {}
 }

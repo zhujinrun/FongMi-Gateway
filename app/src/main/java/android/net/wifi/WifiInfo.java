@@ -24,4 +24,6 @@ public class WifiInfo {
     public int getNetworkId() {
         return 0;
     }
+
+    public int getIpAddress() { return 0; }
 }

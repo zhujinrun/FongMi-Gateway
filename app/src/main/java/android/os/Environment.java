@@ -29,4 +29,6 @@ public class Environment {
     public static boolean isExternalStorageRemovable() {
         return false;
     }
+
+    public static java.lang.String DIRECTORY_DOWNLOADS = null;
 }

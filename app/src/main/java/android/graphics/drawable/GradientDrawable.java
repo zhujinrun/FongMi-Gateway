@@ -5,4 +5,7 @@ public class GradientDrawable extends Drawable {
     public GradientDrawable(Orientation orientation, int[] colors) {}
     public void setCornerRadius(float radius) {}
     public void setColor(int color) {}
+
+    public void setShape(int p0) {}
+    public void setStroke(int p0, int p1) {}
 }

@@ -27,4 +27,7 @@ public class MotionEvent {
     public float getY() {
         return 0;
     }
+
+    public float getRawX() { return 0f; }
+    public float getRawY() { return 0f; }
 }

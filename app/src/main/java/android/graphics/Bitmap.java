@@ -21,4 +21,8 @@ public class Bitmap {
     public static Bitmap createBitmap(int width, int height, Config config) {
         return new Bitmap();
     }
+
+    public static android.graphics.Bitmap createScaledBitmap(android.graphics.Bitmap p0, int p1, int p2, boolean p3) { return null; }
+    public int getAllocationByteCount() { return 0; }
+    public void prepareToDraw() {}
 }

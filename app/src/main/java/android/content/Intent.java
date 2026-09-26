@@ -38,4 +38,7 @@ public class Intent {
     public android.net.Uri getData() {
         return null;
     }
+
+    public boolean hasExtra(java.lang.String p0) { return false; }
+    public android.content.Intent setClassName(java.lang.String p0, java.lang.String p1) { return null; }
 }

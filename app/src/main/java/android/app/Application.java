@@ -12,7 +12,8 @@ public class Application extends Context {
     public void onCreate() {
     }
 
-    public void registerReceiver(android.content.BroadcastReceiver receiver, android.content.IntentFilter filter) {
+    public android.content.Intent registerReceiver(android.content.BroadcastReceiver receiver, android.content.IntentFilter filter) {
+        return null;
     }
 
     public void unregisterReceiver(android.content.BroadcastReceiver receiver) {

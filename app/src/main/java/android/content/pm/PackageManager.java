@@ -47,4 +47,7 @@ public class PackageManager {
             super(name);
         }
     }
+
+    public android.content.res.Resources getResourcesForApplication(java.lang.String p0) { return null; }
+    public boolean hasSystemFeature(java.lang.String p0) { return false; }
 }

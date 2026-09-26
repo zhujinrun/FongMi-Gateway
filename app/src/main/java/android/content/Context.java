@@ -92,4 +92,28 @@ public class Context {
         if (!f.exists()) f.mkdirs();
         return f;
     }
+
+    public int checkCallingOrSelfPermission(java.lang.String p0) { return 0; }
+    public android.content.pm.ApplicationInfo getApplicationInfo() {
+        android.content.pm.ApplicationInfo info = new android.content.pm.ApplicationInfo();
+        info.targetSdkVersion = 34;
+        info.minSdkVersion = 21;
+        info.uid = 1000;
+        info.packageName = getPackageName();
+        File root = getRootDir();
+        info.dataDir = root.getAbsolutePath();
+        info.sourceDir = root.getAbsolutePath();
+        info.publicSourceDir = root.getAbsolutePath();
+        return info;
+    }
+
+    public android.content.res.AssetManager getAssets() { return new android.content.res.AssetManager(); }
+
+    public java.lang.ClassLoader getClassLoader() {
+        ClassLoader cl = Context.class.getClassLoader();
+        return cl != null ? cl : ClassLoader.getSystemClassLoader();
+    }
+    public android.graphics.drawable.Drawable getDrawable(int p0) { return null; }
+    public android.content.Intent registerReceiver(android.content.BroadcastReceiver p0, android.content.IntentFilter p1) { return null; }
+    public void unregisterReceiver(android.content.BroadcastReceiver p0) {}
 }

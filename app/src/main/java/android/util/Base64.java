@@ -51,4 +51,6 @@ public class Base64 {
     public static String encodeToString(byte[] input) {
         return encodeToString(input, DEFAULT);
     }
+
+    public static byte[] encode(byte[] p0, int p1) { return null; }
 }

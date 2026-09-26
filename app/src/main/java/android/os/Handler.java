@@ -37,4 +37,14 @@ public class Handler {
     public final boolean sendMessage(android.os.Message msg) {
         return true;
     }
+
+    public void handleMessage(android.os.Message p0) {}
+    public boolean hasMessages(int p0) { return false; }
+    public android.os.Message obtainMessage() { return null; }
+    public android.os.Message obtainMessage(int p0, int p1, int p2) { return null; }
+    public android.os.Message obtainMessage(int p0, java.lang.Object p1) { return null; }
+    public void removeCallbacksAndMessages(java.lang.Object p0) {}
+    public boolean sendEmptyMessage(int p0) { return false; }
+    public boolean sendEmptyMessageDelayed(int p0, long p1) { return false; }
+    public boolean sendMessageDelayed(android.os.Message p0, long p1) { return false; }
 }

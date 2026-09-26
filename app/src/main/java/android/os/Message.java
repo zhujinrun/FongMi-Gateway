@@ -9,4 +9,7 @@ public class Message {
     public static Message obtain() {
         return new Message();
     }
+
+    public void recycle() {}
+    public void sendToTarget() {}
 }

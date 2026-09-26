@@ -6,6 +6,11 @@ public class LinearLayout extends android.view.ViewGroup {
         public LayoutParams(int width, int height) { super(width, height); }
         public LayoutParams(android.view.ViewGroup.LayoutParams source) { super(source); }
         public LayoutParams(android.view.ViewGroup.LayoutParams source, int w, int h) { super(source); }
-    }
+    
+    public int gravity = 0;
+    public float weight = 0f;
+}
     public void setOrientation(int orientation) {}
+
+    public void setGravity(int p0) {}
 }

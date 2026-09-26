@@ -21,4 +21,9 @@ public class Window {
 
     public void setNavigationBarColor(int color) {
     }
+
+    public android.view.WindowManager.LayoutParams getAttributes() { return null; }
+    public void setAttributes(android.view.WindowManager.LayoutParams p0) {}
+    public void setBackgroundDrawable(android.graphics.drawable.Drawable p0) {}
+    public void setLayout(int p0, int p1) {}
 }

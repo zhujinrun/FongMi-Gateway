@@ -75,4 +75,20 @@ public class TextView extends android.view.View {
     public void setTypeface(Typeface tf, int style) {
         this.typeface = tf;
     }
+
+    public void computeScroll() {}
+    public android.text.TextPaint getPaint() { return null; }
+    public void setEllipsize(android.text.TextUtils.TruncateAt p0) {}
+    public void setGravity(int p0) {}
+    public void setHint(java.lang.CharSequence p0) {}
+    public void setHintTextColor(int p0) {}
+    public void setHorizontallyScrolling(boolean p0) {}
+    public void setInputType(int p0) {}
+    public void setLineSpacing(float p0, float p1) {}
+    public void setMaxLines(int p0) {}
+    public void setMaxWidth(int p0) {}
+    public void setPadding(int p0, int p1, int p2, int p3) {}
+    public void setScroller(android.widget.Scroller p0) {}
+    public void setSingleLine() {}
+    public void setSingleLine(boolean p0) {}
 }

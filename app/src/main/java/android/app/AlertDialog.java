@@ -105,4 +105,6 @@ public class AlertDialog extends Dialog {
             return dialog;
         }
     }
+
+    public android.widget.Button getButton(int p0) { return null; }
 }

@@ -35,4 +35,6 @@ public class TypedValue {
     public static float getDimension(DisplayMetrics metrics) {
         return metrics.density;
     }
+
+    public static float applyDimension(int p0, float p1, android.util.DisplayMetrics p2) { return 0f; }
 }

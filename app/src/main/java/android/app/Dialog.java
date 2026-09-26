@@ -58,4 +58,6 @@ public class Dialog implements DialogInterface {
 
     public void show(android.view.View v) {
     }
+
+    public android.view.Window getWindow() { return null; }
 }

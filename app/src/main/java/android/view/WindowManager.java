@@ -13,7 +13,9 @@ public class WindowManager {
         public int flags;
         public int type;
         public float alpha = 1f;
-    }
+    
+    public int gravity = 0;
+}
 
     public void addView(View view, LayoutParams params) {
     }
@@ -23,4 +25,6 @@ public class WindowManager {
 
     public void removeView(View view) {
     }
+
+    public android.view.Display getDefaultDisplay() { return null; }
 }
