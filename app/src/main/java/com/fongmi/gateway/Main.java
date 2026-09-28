@@ -18,6 +18,7 @@ public class Main {
                     + "|" + REPO + "wex_spider.jar;md5;" + REPO + "wex_spider.jar.md5";
 
     public static void main(String[] args) throws Exception {
+        com.fongmi.gateway.log.LogFilterStream.install();
         String host = "127.0.0.1";
         int port = 9979;
         String token = "";
