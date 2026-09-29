@@ -69,6 +69,15 @@ public class GatewayServer {
                 return;
             }
 
+            // Block site-dependent requests until background preload (spider jars + config)
+            // finishes, so first-launch /home and /category don't race startup and hit
+            // "site not found". /health stays instant for probes and instance detection.
+            if (!"/health".equals(path) && !VodConfig.get().isReady()) {
+                if (!VodConfig.get().awaitReady(55_000)) {
+                    System.err.println("[gateway] preload still running after 55s, continuing: " + path);
+                }
+            }
+
             String response;
             if (isCatvodPath(path)) {
                 response = handleCatvod(path, q, body);
@@ -473,6 +482,7 @@ public class GatewayServer {
         o.addProperty("ok", true);
         o.addProperty("version", "0.1.0");
         o.addProperty("loaded", VodConfig.get().isLoaded());
+        o.addProperty("ready", VodConfig.get().isReady());
         GsonHolder.GSON.toJsonTree(VodConfig.get().summary()).getAsJsonObject().entrySet()
                 .forEach(e -> o.add("config." + e.getKey(), e.getValue()));
         return o;

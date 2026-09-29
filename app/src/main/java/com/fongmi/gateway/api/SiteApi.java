@@ -66,6 +66,7 @@ public class SiteApi {
 
     public static String categoryContent(String key, String tid, String pg, boolean filter, Map<String, String> extend) throws Exception {
         Site site = VodConfig.get().getSite(key);
+        if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
             HashMap<String, String> ext = extend == null ? new HashMap<>() : new HashMap<>(extend);
             String category = spider(site).categoryContent(tid == null ? "" : tid, pg == null || pg.isEmpty() ? "1" : pg, filter, ext);
@@ -84,6 +85,7 @@ public class SiteApi {
 
     public static String detailContent(String key, String id) throws Exception {
         Site site = VodConfig.get().getSite(key);
+        if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
             String detail = spider(site).detailContent(Arrays.asList(id));
             return detail == null || detail.isEmpty() ? emptyVod() : detail;
@@ -121,6 +123,7 @@ public class SiteApi {
 
     public static String playerContent(String key, String flag, String id) throws Exception {
         Site site = VodConfig.get().getSite(key);
+        if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
             String player = spider(site).playerContent(flag, id, VodConfig.get().getFlags());
             JsonObject result;

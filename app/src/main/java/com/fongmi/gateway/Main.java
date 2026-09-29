@@ -111,6 +111,8 @@ public class Main {
                 }
             } catch (Throwable t) {
                 System.err.println("[gateway] preload error (ignored): " + t);
+            } finally {
+                VodConfig.get().markReady();
             }
         }, "gateway-preload");
         preload.setDaemon(true);

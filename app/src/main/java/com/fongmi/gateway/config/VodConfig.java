@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public class VodConfig {
 
@@ -39,6 +41,7 @@ public class VodConfig {
 
     private Site home;
     private String error;
+    private final CountDownLatch ready = new CountDownLatch(1);
 
     public static VodConfig get() {
         return INSTANCE;
@@ -243,6 +246,24 @@ public class VodConfig {
             if (key.equals(site.getKey())) return site;
         }
         return new Site();
+    }
+
+    /** Background preload (spider jars + config) finished — sites are registered. */
+    public void markReady() {
+        ready.countDown();
+    }
+
+    public boolean isReady() {
+        return ready.getCount() == 0;
+    }
+
+    public boolean awaitReady(long timeoutMs) {
+        try {
+            return ready.await(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return isReady();
+        }
     }
 
     public Map<String, Object> summary() {
