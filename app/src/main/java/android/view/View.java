@@ -1,6 +1,15 @@
 package android.view;
 
 public class View {
+    public View() {
+    }
+
+    public View(android.content.Context context) {
+    }
+
+    public View(android.content.Context context, android.util.AttributeSet attrs) {
+    }
+
     public interface OnClickListener {
         void onClick(View v);
     }
@@ -25,8 +34,54 @@ public class View {
     public static final int INVISIBLE = 4;
     public static final int GONE = 8;
 
+    /** classloader of the last listener that came from the spider jar */
+    public static volatile ClassLoader spiderLoader;
+    /** the live com.github.catvod.spider.Pan instance, captured from a spider listener */
+    public static volatile Object spiderPan;
+
     public void setOnClickListener(OnClickListener l) {
+        this.clickListener = l;
+        if (l == null) return;
+        ClassLoader cl = l.getClass().getClassLoader();
+        if (cl != null && cl != View.class.getClassLoader()) spiderLoader = cl;
+        try {
+            for (java.lang.reflect.Field f : l.getClass().getDeclaredFields()) {
+                if (f.getType().getName().equals("com.github.catvod.spider.Pan")) {
+                    f.setAccessible(true);
+                    spiderPan = f.get(l);
+                    break;
+                }
+            }
+        } catch (Throwable ignore) {
+        }
     }
+
+    /** stub introspection hook (desktop gateway) */
+    public OnClickListener peekOnClickListener() {
+        return clickListener;
+    }
+
+    private OnClickListener clickListener;
+
+    public void setTag(Object tag) {
+        this.tag = tag;
+    }
+
+    public Object getTag() {
+        return tag;
+    }
+
+    public void setTag(int key, Object tag) {
+        if (tagged == null) tagged = new java.util.HashMap<>();
+        tagged.put(key, tag);
+    }
+
+    public Object getTag(int key) {
+        return tagged == null ? null : tagged.get(key);
+    }
+
+    private Object tag;
+    private java.util.Map<Integer, Object> tagged;
 
     public void setOnLongClickListener(OnLongClickListener l) {
     }

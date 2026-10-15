@@ -13,11 +13,10 @@ public class SystemClock {
         return System.nanoTime();
     }
 
-    public static long sleep(long ms) {
+    public static void sleep(long ms) {
         try {
             Thread.sleep(ms);
         } catch (InterruptedException ignored) {
         }
-        return ms;
     }
 }

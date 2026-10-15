@@ -21,6 +21,7 @@ public class Activity extends Context {
     }
 
     public void setContentView(View view) {
+        System.err.println("[ui] Activity.setContentView: " + view);
     }
 
     public void setContentView(View view, ViewGroup.LayoutParams params) {

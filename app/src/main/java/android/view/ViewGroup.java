@@ -6,6 +6,17 @@ import java.util.List;
 public class ViewGroup extends View {
     private final List<View> children = new ArrayList<>();
 
+    public ViewGroup() {
+    }
+
+    public ViewGroup(android.content.Context context) {
+        super(context);
+    }
+
+    public ViewGroup(android.content.Context context, android.util.AttributeSet attrs) {
+        super(context, attrs);
+    }
+
     public static class LayoutParams {
         public static final int MATCH_PARENT = -1;
         public static final int WRAP_CONTENT = -2;

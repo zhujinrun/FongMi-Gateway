@@ -1,5 +1,16 @@
 package android.widget;
 public class LinearLayout extends android.view.ViewGroup {
+    public LinearLayout() {
+    }
+
+    public LinearLayout(android.content.Context context) {
+        super(context);
+    }
+
+    public LinearLayout(android.content.Context context, android.util.AttributeSet attrs) {
+        super(context, attrs);
+    }
+
     public static class LayoutParams extends android.view.ViewGroup.MarginLayoutParams {
         public static final int HORIZONTAL = 0;
         public static final int VERTICAL = 1;

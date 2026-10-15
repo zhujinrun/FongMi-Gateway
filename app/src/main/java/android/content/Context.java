@@ -50,6 +50,7 @@ public class Context {
     }
 
     public Object getSystemService(String name) {
+        if ("wifi".equals(name) || "WIFI".equals(name)) return new android.net.wifi.WifiManager();
         return null;
     }
 
