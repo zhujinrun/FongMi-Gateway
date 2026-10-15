@@ -9,9 +9,11 @@ import com.github.catvod.crawler.SpiderNull;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.utils.Json;
 import com.github.catvod.utils.Util;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -23,6 +25,62 @@ import okhttp3.Request;
 import okhttp3.Response;
 
 public class SiteApi {
+
+    /**
+     * Build the drive-login QR URL the phone will scan. It must carry the gateway's LAN IP
+     * (not 127.0.0.1) and the gateway's real port so the phone can reach /proxy?do=input.
+     * Port matches the spider LoginShow QR convention (proxy input endpoint).
+     */
+    public static String loginQr() {
+        String ip = lanIp();
+        int port = com.github.catvod.Proxy.getPort();
+        JsonObject o = new JsonObject();
+        o.addProperty("url", "http://" + ip + ":" + port + "/proxy?do=input&csp=drive");
+        o.addProperty("ip", ip);
+        o.addProperty("port", port);
+        return o.toString();
+    }
+
+    /**
+     * Best-effort LAN IPv4 that a phone on the same network can actually reach.
+     * Prefer the OS outbound source IP (default-route interface) via a UDP probe —
+     * it skips virtual/NIC aliases that enumeration may hit first. Fall back to
+     * enumerating site-local IPv4s. Returns 127.0.0.1 if all else fails.
+     */
+    private static String lanIp() {
+        // 1) UDP probe: letting the kernel pick the source for a public peer yields the
+        //    interface with the default route (the real LAN IP), without sending a packet.
+        try (java.net.DatagramSocket s = new java.net.DatagramSocket()) {
+            s.connect(java.net.InetAddress.getByName("8.8.8.8"), 80);
+            java.net.InetAddress a = s.getLocalAddress();
+            String ip = a == null ? null : a.getHostAddress();
+            if (ip != null && isReachable(ip)) return ip;
+        } catch (Throwable ignored) {
+        }
+        // 2) Fallback: first site-local IPv4 that is not loopback/link-local.
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> ifs = java.net.NetworkInterface.getNetworkInterfaces();
+            while (ifs != null && ifs.hasMoreElements()) {
+                java.net.NetworkInterface nif = ifs.nextElement();
+                if (!nif.isUp() || nif.isLoopback()) continue;
+                java.util.Enumeration<java.net.InetAddress> addrs = nif.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    java.net.InetAddress a = addrs.nextElement();
+                    if (a instanceof java.net.Inet4Address && isReachable(a.getHostAddress())) {
+                        return a.getHostAddress();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return "127.0.0.1";
+    }
+
+    /** True for a concrete IPv4 we can hand to the phone (not 0.0.0.0 / loopback / link-local). */
+    private static boolean isReachable(String ip) {
+        if (ip == null || ip.isEmpty()) return false;
+        return !ip.startsWith("127.") && !ip.startsWith("169.254.") && !ip.equals("0.0.0.0");
+    }
 
     public static String homeContent(String key) throws Exception {
         Site site = VodConfig.get().getSite(key);
@@ -141,6 +199,7 @@ public class SiteApi {
                 site.getHeader().forEach(header::addProperty);
                 if (!result.has("header") || result.get("header").isJsonNull()) result.add("header", header);
             }
+            wrapPlayUrl(result);
             return result.toString();
         }
         // type 0/1: treat id as direct/play url; may need parse later
@@ -156,6 +215,67 @@ public class SiteApi {
             result.add("header", header);
         }
         return result.toString();
+    }
+
+    /**
+     * Make spider play output playable by strict clients:
+     * 1) some spiders return `header` as a JSON string — parse it into an object;
+     * 2) route media through this gateway's /proxy?do=raw when the response carries headers
+     *    (so they are actually applied and every m3u8 segment keeps them), or when the url
+     *    points at the spider's embedded file server (it emits both Content-Length and
+     *    Transfer-Encoding: chunked plus a wrong Content-Length on Range, which Node rejects
+     *    and browsers may reject or stall on).
+     */
+    private static void wrapPlayUrl(JsonObject result) {
+        try {
+            if (result.has("header")) {
+                JsonElement h = result.get("header");
+                if (h != null && h.isJsonPrimitive() && h.getAsJsonPrimitive().isString()) {
+                    String raw = h.getAsString() == null ? "" : h.getAsString().trim();
+                    if (raw.startsWith("{")) {
+                        try {
+                            result.add("header", JsonParser.parseString(raw).getAsJsonObject());
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+            if (!result.has("url") || !result.get("url").isJsonPrimitive()) return;
+            String url = result.get("url").getAsString();
+            if (url == null || url.isEmpty() || !url.startsWith("http")) return;
+            String self = "http://127.0.0.1:" + com.github.catvod.Proxy.getPort() + "/proxy";
+            if (url.startsWith(self + "?")) return;
+            JsonObject header = null;
+            if (result.has("header") && result.get("header").isJsonObject()) {
+                header = result.getAsJsonObject("header");
+            }
+            boolean localProxy = url.matches("^http://(127\\.0\\.0\\.1|localhost):\\d+/proxy/.+");
+            boolean hasHeader = header != null && header.size() > 0;
+            if (!localProxy && !hasHeader) return;
+            StringBuilder sb = new StringBuilder(self).append("?do=raw&url=")
+                    .append(java.net.URLEncoder.encode(url, StandardCharsets.UTF_8));
+            if (hasHeader) {
+                sb.append("&headers=").append(java.net.URLEncoder.encode(header.toString(), StandardCharsets.UTF_8));
+            }
+            result.addProperty("url", sb.toString());
+            System.err.println("[gateway] play url wrapped: localProxy=" + localProxy + " withHeader=" + hasHeader);
+        } catch (Throwable t) {
+            System.err.println("[gateway] wrap play url failed: " + t);
+        }
+    }
+
+    public static String action(String key, String action) throws Exception {
+        Site site = VodConfig.get().getSite(key);
+        if (site.isEmpty()) throw new Exception("site not found: " + key);
+        if (action == null || action.isEmpty()) throw new Exception("empty action");
+        if (site.isSpider()) {
+            Spider sp = spider(site);
+            String result = sp.action(action);
+            return result == null || result.isEmpty() ? "{}" : result;
+        }
+        Map<String, String> params = new HashMap<>();
+        params.put("action", action);
+        return httpGet(site, params);
     }
 
     public static String liveContent(String name, String url) throws Exception {
