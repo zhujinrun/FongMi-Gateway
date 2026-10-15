@@ -2,6 +2,7 @@ package com.fongmi.gateway;
 
 import android.content.Context;
 
+import com.fongmi.gateway.config.Site;
 import com.fongmi.gateway.config.VodConfig;
 import com.fongmi.gateway.server.GatewayServer;
 import com.github.catvod.Init;
@@ -9,6 +10,8 @@ import com.github.catvod.utils.Prefers;
 
 import java.io.File;
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Main {
 
@@ -19,7 +22,7 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         com.fongmi.gateway.log.LogFilterStream.install();
-        String host = "127.0.0.1";
+        String host = "0.0.0.0";
         int port = 9979;
         String token = "";
         File dataDir = new File(System.getProperty("user.home"), ".gateway");
@@ -133,6 +136,10 @@ public class Main {
                 okSpider = err == null || err.isEmpty();
                 if (okSpider) {
                     System.out.println("[gateway] spider jar preloaded: " + spider);
+                } else if (isAndroidOnlyJar(err)) {
+                    // config spider is an Android-guard jar (DexClassLoader + .so): expected on desktop,
+                    // not a fault. Real implementations come from the --spider pool below.
+                    System.out.println("[gateway] config spider is Android-only (DexClassLoader/native), desktop will use --spider pool");
                 } else {
                     System.err.println("[gateway] config spider failed: " + err);
                 }
@@ -151,10 +158,38 @@ public class Main {
             }
             if (!okSpider) {
                 System.err.println("[gateway] no runnable spider jar; csp sites will fail until --spider is set");
+            } else {
+                reportSpiderCoverage();
             }
             System.out.println("[gateway] config loaded: " + VodConfig.get().summary());
         } catch (Throwable t) {
             System.err.println("[gateway] config load failed (ignored): " + t);
+        }
+    }
+
+    private static boolean isAndroidOnlyJar(String err) {
+        return err.contains("requires Android native/Dex") || err.contains("dalvik.system.DexClassLoader");
+    }
+
+    /** Known limitation report: list csp sites the loaded pool cannot resolve. */
+    public static void reportSpiderCoverage() {
+        try {
+            List<String> missing = new ArrayList<>();
+            int csp = 0;
+            for (Site site : VodConfig.get().getSites()) {
+                String api = site.getApi();
+                if (api == null || !api.startsWith("csp_")) continue;
+                csp++;
+                if (!com.fongmi.gateway.loader.BaseLoader.get().hasSpider(api)) missing.add(site.getKey() + "(" + api + ")");
+            }
+            if (missing.isEmpty()) {
+                System.out.println("[gateway] spider coverage: " + csp + "/" + csp + " csp sites resolvable");
+            } else {
+                System.err.println("[gateway] spider coverage: " + (csp - missing.size()) + "/" + csp
+                        + " csp sites resolvable; missing " + missing.size() + " (known limitation): " + String.join(", ", missing));
+            }
+        } catch (Throwable t) {
+            System.err.println("[gateway] spider coverage check failed (ignored): " + t);
         }
     }
 
@@ -171,7 +206,7 @@ public class Main {
                 CatVod Gateway 0.1.0
                 Usage: java -jar gateway.jar [options] [configUrl]
 
-                  --host <ip>       bind address (default 127.0.0.1)
+                  --host <ip>       bind address (default 0.0.0.0)
                   --port <n>        listen port (default 9979)
                   --token <t>       required X-Gateway-Token (auto if non-local)
                   --data <dir>      data directory (default ~/.gateway)

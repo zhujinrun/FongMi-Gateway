@@ -71,6 +71,13 @@ public class BaseLoader {
         return false;
     }
 
+    /** True if a spider class for this csp api is resolvable from the currently loaded jar pool. */
+    public boolean hasSpider(String api) {
+        if (api == null || api.isEmpty()) return true;
+        if (!isCsp(api)) return true;
+        return jarLoader.hasSpiderClass(api);
+    }
+
     public String recent() {
         return jarLoader.getRecent();
     }

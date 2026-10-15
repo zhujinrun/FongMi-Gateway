@@ -585,6 +585,20 @@ public class JarLoader {
         });
     }
 
+    /** True if some jar in the current pool can resolve this csp api to a loadable class. Never instantiates. */
+    public boolean hasSpiderClass(String api) {
+        if (api == null || !api.startsWith("csp_")) return true;
+        String simple = api.substring("csp_".length());
+        for (URLClassLoader loader : loaders.values()) {
+            try {
+                loadSpiderClass(loader, simple);
+                return true;
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
+        return false;
+    }
+
     /** Config uses csp_*Guard; jar classes are often without the Guard suffix. */
     private static Class<?> loadSpiderClass(URLClassLoader loader, String simple) throws ClassNotFoundException {
         String[] candidates = simple.endsWith("Guard")
