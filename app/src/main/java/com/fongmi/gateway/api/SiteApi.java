@@ -9,6 +9,7 @@ import com.github.catvod.crawler.SpiderNull;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.utils.Json;
 import com.github.catvod.utils.Util;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -17,8 +18,16 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import okhttp3.HttpUrl;
 import okhttp3.Request;
@@ -146,7 +155,8 @@ public class SiteApi {
         if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
             String detail = spider(site).detailContent(Arrays.asList(id));
-            return detail == null || detail.isEmpty() ? emptyVod() : detail;
+            if (detail == null || detail.isEmpty()) return emptyVod();
+            return filterDeadDriveLines(detail);
         }
         Map<String, String> params = new HashMap<>();
         params.put("ac", site.getType() == 0 ? "videolist" : "detail");
@@ -183,7 +193,9 @@ public class SiteApi {
         Site site = VodConfig.get().getSite(key);
         if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
-            String player = spider(site).playerContent(flag, id, VodConfig.get().getFlags());
+            String dead = deadDriveReason(flag);
+            if (dead != null) throw new Exception("线路 " + flag + " " + dead + "，已跳过以免卡死");
+            String player = spiderPlayWithTimeout(site, flag, id);
             JsonObject result;
             if (Json.isObj(player) && player != null && !player.isEmpty()) {
                 result = JsonParser.parseString(player).getAsJsonObject();
@@ -215,6 +227,156 @@ public class SiteApi {
             result.add("header", header);
         }
         return result.toString();
+    }
+
+    // ---- unlogged-drive protection --------------------------------------------------------
+    // The spider's Cloud_uc/... playerContent retries with SystemClock.sleep() loops when the
+    // drive is not logged in, blocking the request forever (Player sees a 120s axios timeout
+    // and one HttpServer thread leaks per attempt). Two guards: hide dead lines up front, and
+    // hard-timeout any spider play that still runs away.
+
+    private static final long PLAY_TIMEOUT_MS = 30_000;
+    private static final long PLAY_BUSY_TTL_MS = 10 * 60_000;
+    private static final long PLAY_BUSY_SHORT_TTL_MS = 60_000;
+    private static final ExecutorService PLAY_POOL = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "gateway-play");
+        t.setDaemon(true);
+        return t;
+    });
+    /** key|flag -> timestamp of the play that never came back */
+    private static final ConcurrentHashMap<String, Long> PLAY_BUSY = new ConcurrentHashMap<>();
+    /** drive prefix -> {loggedIn, enabled}, parsed from the drive panel labels; sticky while the panel is closed */
+    private static volatile Map<String, boolean[]> DRIVE_STATE = Map.of();
+
+    /**
+     * Per-drive login/enable state from the spider login panel ("我的夸父- 已登录" / "启用中").
+     * Live-parsed while the panel is open; keeps the last known state when it is closed.
+     */
+    private static Map<String, boolean[]> driveStates() {
+        try {
+            int n = android.app.AlertDialog.clickableCount();
+            if (n > 0) {
+                Map<String, boolean[]> m = new LinkedHashMap<>();
+                for (int i = 0; i < n; i++) {
+                    String l = String.valueOf(android.app.AlertDialog.clickableLabel(i));
+                    int dash = l.lastIndexOf('-');
+                    if (dash < 0) dash = l.lastIndexOf('－');
+                    if (!l.contains("我的") || dash < 0) continue;
+                    int start = l.indexOf("我的") + 2;
+                    if (start >= dash) continue;
+                    String name = l.substring(start, dash).trim();
+                    if (name.isEmpty()) continue;
+                    boolean loggedIn = l.contains("已登录");
+                    boolean enabled = loggedIn;
+                    if (i + 1 < n) {
+                        String next = String.valueOf(android.app.AlertDialog.clickableLabel(i + 1));
+                        if (next.contains("启用中")) enabled = true;
+                        else if (next.contains("停用中")) enabled = false;
+                    }
+                    m.put(name, new boolean[]{loggedIn, enabled});
+                }
+                if (!m.isEmpty()) DRIVE_STATE = m;
+            }
+        } catch (Throwable ignored) {
+        }
+        return DRIVE_STATE;
+    }
+
+    /** Longest drive prefix matching this play line, or null. */
+    private static boolean[] matchDrive(String line, Map<String, boolean[]> states) {
+        if (line == null || line.isEmpty() || states.isEmpty()) return null;
+        boolean[] best = null;
+        int bestLen = 0;
+        for (Map.Entry<String, boolean[]> e : states.entrySet()) {
+            String name = e.getKey();
+            if (line.startsWith(name) && name.length() > bestLen) {
+                best = e.getValue();
+                bestLen = name.length();
+            }
+        }
+        return best;
+    }
+
+    /** Reason string when the line's drive is known to be not-logged-in / not-enabled, else null. */
+    private static String deadDriveReason(String line) {
+        boolean[] st = matchDrive(line, driveStates());
+        if (st == null) return null;
+        if (!st[0] && !st[1]) return "网盘未登录且未启用";
+        if (!st[0]) return "网盘未登录";
+        if (!st[1]) return "网盘未启用";
+        return null;
+    }
+
+    /** Drop detail play lines whose drive is known dead, so the user cannot click them into a hang. */
+    private static String filterDeadDriveLines(String json) {
+        Map<String, boolean[]> states = driveStates();
+        if (states.isEmpty()) return json;
+        try {
+            JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+            JsonArray list = o.has("list") && o.get("list").isJsonArray() ? o.getAsJsonArray("list") : null;
+            if (list == null) return json;
+            for (JsonElement e : list) {
+                if (!e.isJsonObject()) continue;
+                JsonObject v = e.getAsJsonObject();
+                if (!v.has("vod_play_from") || !v.get("vod_play_from").isJsonPrimitive()) continue;
+                String from = v.get("vod_play_from").getAsString();
+                String urls = v.has("vod_play_url") && v.get("vod_play_url").isJsonPrimitive() ? v.get("vod_play_url").getAsString() : "";
+                String[] names = from.split("\\$\\$\\$");
+                String[] urlParts = urls.split("\\$\\$\\$", -1);
+                StringBuilder nf = new StringBuilder();
+                StringBuilder nu = new StringBuilder();
+                int kept = 0;
+                for (int i = 0; i < names.length; i++) {
+                    String nm = names[i].trim();
+                    String reason = deadDriveReason(nm);
+                    if (reason != null) {
+                        System.err.println("[gateway] drive line hidden: " + nm + " (" + reason + ")");
+                        continue;
+                    }
+                    if (kept > 0) {
+                        nf.append("$$$");
+                        nu.append("$$$");
+                    }
+                    nf.append(nm);
+                    nu.append(i < urlParts.length ? urlParts[i] : "");
+                    kept++;
+                }
+                v.addProperty("vod_play_from", nf.toString());
+                v.addProperty("vod_play_url", nu.toString());
+            }
+            return o.toString();
+        } catch (Throwable ignore) {
+            return json;
+        }
+    }
+
+    /**
+     * Run the spider play off-thread with a hard timeout. On timeout the spider thread is
+     * interrupted (its retry loop uses interruptible Thread.sleep) and the flag is marked busy
+     * so repeat clicks fail instantly instead of leaking more stuck threads.
+     */
+    private static String spiderPlayWithTimeout(Site site, String flag, String id) throws Exception {
+        String busyKey = site.getKey() + "|" + flag;
+        Long since = PLAY_BUSY.get(busyKey);
+        long ttl = matchDrive(flag, driveStates()) != null ? PLAY_BUSY_TTL_MS : PLAY_BUSY_SHORT_TTL_MS;
+        if (since != null && System.currentTimeMillis() - since < ttl) {
+            throw new Exception("线路 " + flag + " 上一次播放仍无响应（网盘可能未登录），请先在网盘设置里登录该网盘");
+        }
+        Future<String> future = PLAY_POOL.submit(() -> spider(site).playerContent(flag, id, VodConfig.get().getFlags()));
+        try {
+            String result = future.get(PLAY_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            PLAY_BUSY.remove(busyKey);
+            return result;
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            PLAY_BUSY.put(busyKey, System.currentTimeMillis());
+            System.err.println("[gateway] spider play timed out after " + PLAY_TIMEOUT_MS + "ms: site=" + site.getKey() + " flag=" + flag);
+            throw new Exception("线路 " + flag + " 播放超时（网盘可能未登录），请先在网盘设置里登录该网盘");
+        } catch (ExecutionException e) {
+            Throwable c = e.getCause();
+            if (c instanceof Exception) throw (Exception) c;
+            throw e;
+        }
     }
 
     /**
