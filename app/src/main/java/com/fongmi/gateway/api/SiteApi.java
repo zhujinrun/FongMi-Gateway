@@ -35,6 +35,57 @@ import okhttp3.Response;
 
 public class SiteApi {
 
+    // ---- result cache ---------------------------------------------------------------------
+    // spider home/category hit the remote CMS and cost 0.9~3.3s each; Player re-fetches them
+    // on every source switch / category flip. Cache the raw result JSON for a short window so
+    // re-entering a source/category returns instantly. TTL is short enough that stale data is
+    // not a real concern; only spider results are cached (non-spider httpGet goes straight to
+    // the source and is left alone for now).
+    private static final long HOME_TTL_MS = 60_000;
+    private static final long CATEGORY_TTL_MS = 15_000;
+    private static final int CACHE_MAX = 512;
+    private static final java.util.LinkedHashMap<String, long[]> CACHE_HOME =
+            new java.util.LinkedHashMap<String, long[]>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, long[]> e) {
+                    return size() > CACHE_MAX;
+                }
+            };
+    private static final java.util.LinkedHashMap<String, long[]> CACHE_CATEGORY =
+            new java.util.LinkedHashMap<String, long[]>(128, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, long[]> e) {
+                    return size() > CACHE_MAX;
+                }
+            };
+    // key -> [expireAt, cachedValue] where cachedValue is the JSON string (stored as a separate
+    // map to keep the LinkedHashMap lightweight and thread-safe via synchronization).
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> HOME_BODY =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> CATEGORY_BODY =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String cached(java.util.LinkedHashMap<String, long[]> ttlMap,
+                                 java.util.concurrent.ConcurrentHashMap<String, String> bodyMap,
+                                 String key) {
+        synchronized (ttlMap) {
+            long[] e = ttlMap.get(key);
+            if (e != null && e[0] > System.currentTimeMillis()) {
+                return bodyMap.get(key);
+            }
+            return null;
+        }
+    }
+
+    private static void cachePut(java.util.LinkedHashMap<String, long[]> ttlMap,
+                                 java.util.concurrent.ConcurrentHashMap<String, String> bodyMap,
+                                 String key, String value, long ttlMs) {
+        synchronized (ttlMap) {
+            ttlMap.put(key, new long[]{System.currentTimeMillis() + ttlMs, 0});
+            bodyMap.put(key, value);
+        }
+    }
+
     /**
      * Build the drive-login QR URL the phone will scan. It must carry the gateway's LAN IP
      * (not 127.0.0.1) and the gateway's real port so the phone can reach /proxy?do=input.
@@ -95,6 +146,8 @@ public class SiteApi {
         Site site = VodConfig.get().getSite(key);
         if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
+            String hit = cached(CACHE_HOME, HOME_BODY, key);
+            if (hit != null) return hit;
             Spider spider = spider(site);
             String home = spider.homeContent(true);
             String video = spider.homeVideoContent();
@@ -126,6 +179,7 @@ public class SiteApi {
             }
             result.addProperty("key", site.getKey());
             result.addProperty("siteName", site.getName());
+            cachePut(CACHE_HOME, HOME_BODY, key, result.toString(), HOME_TTL_MS);
             return result.toString();
         }
         return httpGet(site, Map.of("filter", "true"));
@@ -135,9 +189,15 @@ public class SiteApi {
         Site site = VodConfig.get().getSite(key);
         if (site.isEmpty()) throw new Exception("site not found: " + key);
         if (site.isSpider()) {
+            String cacheKey = key + "|" + (tid == null ? "" : tid) + "|" + (pg == null || pg.isEmpty() ? "1" : pg)
+                    + "|" + (filter ? "1" : "0") + "|" + (extend == null ? "" : extend.toString());
+            String hit = cached(CACHE_CATEGORY, CATEGORY_BODY, cacheKey);
+            if (hit != null) return hit;
             HashMap<String, String> ext = extend == null ? new HashMap<>() : new HashMap<>(extend);
             String category = spider(site).categoryContent(tid == null ? "" : tid, pg == null || pg.isEmpty() ? "1" : pg, filter, ext);
-            return category == null || category.isEmpty() ? emptyList() : category;
+            String result = category == null || category.isEmpty() ? emptyList() : category;
+            cachePut(CACHE_CATEGORY, CATEGORY_BODY, cacheKey, result, CATEGORY_TTL_MS);
+            return result;
         }
         Map<String, String> params = new HashMap<>();
         params.put("ac", site.getType() == 0 ? "videolist" : "detail");
