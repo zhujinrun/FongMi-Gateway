@@ -93,6 +93,7 @@ public class GatewayServer {
             }
             switch (path) {
                 case "/health" -> response = ok(summary());
+                case "/warm" -> response = ok(warm(req(q, body, "site", "key")));
                 case "/config" -> response = handleConfig(q, body);
                 case "/sites" -> response = ok(GsonHolder.GSON.toJsonTree(sites()));
                 case "/home" -> response = ok(single(SiteApi.homeContent(req(q, body, "site", "key"))));
@@ -884,6 +885,57 @@ public class GatewayServer {
         o.addProperty("ready", VodConfig.get().isReady());
         GsonHolder.GSON.toJsonTree(VodConfig.get().summary()).getAsJsonObject().entrySet()
                 .forEach(e -> o.add("config." + e.getKey(), e.getValue()));
+        return o;
+    }
+
+    /**
+     * Warm a spider source's first homeContent off the request path. The first call pays a
+     * one-time cost (domain probing + first CMS fetch) that would otherwise hit the user's
+     * first click. With no site param, warm the first spider source as a fallback.
+     * Returns immediately; the warm runs on a daemon thread and fills the result cache so
+     * the next real /home or /category returns instantly.
+     */
+    private JsonObject warm(String siteKey) {
+        JsonObject o = new JsonObject();
+        try {
+            Site target = null;
+            if (siteKey != null && !siteKey.isEmpty()) {
+                target = VodConfig.get().getSite(siteKey);
+                if (target.isEmpty()) target = null;
+            }
+            if (target == null) {
+                for (Site site : VodConfig.get().getSites()) {
+                    if (site.isSpider() && site.getApi().startsWith("csp_")) {
+                        target = site;
+                        break;
+                    }
+                }
+            }
+            if (target == null) {
+                o.addProperty("ok", false);
+                o.addProperty("reason", "no spider site");
+                return o;
+            }
+            final Site t = target;
+            o.addProperty("ok", true);
+            o.addProperty("key", t.getKey());
+            o.addProperty("warming", true);
+            Thread th = new Thread(() -> {
+                try {
+                    long t0 = System.currentTimeMillis();
+                    System.out.println("[gateway] warm: " + t.getKey() + " (" + t.getApi() + ")");
+                    SiteApi.homeContent(t.getKey());
+                    System.out.println("[gateway] warmed " + t.getKey() + " in " + (System.currentTimeMillis() - t0) + "ms");
+                } catch (Throwable e) {
+                    System.err.println("[gateway] warm failed (ignored): " + e);
+                }
+            }, "gateway-warm");
+            th.setDaemon(true);
+            th.start();
+        } catch (Throwable t) {
+            o.addProperty("ok", false);
+            o.addProperty("reason", String.valueOf(t));
+        }
         return o;
     }
 

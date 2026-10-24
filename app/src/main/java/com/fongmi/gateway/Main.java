@@ -112,6 +112,7 @@ public class Main {
                 if (cfg != null && !cfg.isEmpty()) {
                     loadConfigWithSpiderFallback(cfg, spiderUrl);
                 }
+                warmFirstSpider();
             } catch (Throwable t) {
                 System.err.println("[gateway] preload error (ignored): " + t);
             } finally {
@@ -122,6 +123,37 @@ public class Main {
         preload.start();
 
         Thread.currentThread().join();
+    }
+
+    /**
+     * Warm the first runnable spider source in the background. A spider's first
+     * homeContent() pays a one-time cost (UrlChecker domain probing + widening + first CMS
+     * fetch, ~5s for 瓜子) that the user would otherwise hit on their first source click.
+     * Triggering it here, off the request path, moves that cost into startup so the first
+     * real /home or /category returns instantly (also filling the 60s/15s result cache).
+     * Failures are swallowed — a source that can't be warmed is simply cold on first click.
+     */
+    private static void warmFirstSpider() {
+        Thread warmer = new Thread(() -> {
+            try {
+                Site target = null;
+                for (Site site : VodConfig.get().getSites()) {
+                    if (site.isSpider() && site.getApi().startsWith("csp_")) {
+                        target = site;
+                        break;
+                    }
+                }
+                if (target == null) return;
+                long t0 = System.currentTimeMillis();
+                System.out.println("[gateway] warming first spider: " + target.getKey() + " (" + target.getApi() + ")");
+                com.fongmi.gateway.api.SiteApi.homeContent(target.getKey());
+                System.out.println("[gateway] warmed " + target.getKey() + " in " + (System.currentTimeMillis() - t0) + "ms");
+            } catch (Throwable t) {
+                System.err.println("[gateway] warm first spider failed (ignored): " + t);
+            }
+        }, "gateway-warm");
+        warmer.setDaemon(true);
+        warmer.start();
     }
 
     private static void loadConfigWithSpiderFallback(String configUrl, String spiderFallback) {
