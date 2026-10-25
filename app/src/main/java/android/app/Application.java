@@ -18,4 +18,27 @@ public class Application extends Context {
 
     public void unregisterReceiver(android.content.BroadcastReceiver receiver) {
     }
+
+    public void registerActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback) {
+    }
+
+    public void unregisterActivityLifecycleCallbacks(ActivityLifecycleCallbacks callback) {
+    }
+
+    /** Desktop stub: some spiders (e.g. wexguard 壳的 InitOrigin$1) implement this. */
+    public interface ActivityLifecycleCallbacks {
+        void onActivityCreated(Activity activity, android.os.Bundle savedInstanceState);
+
+        void onActivityStarted(Activity activity);
+
+        void onActivityResumed(Activity activity);
+
+        void onActivityPaused(Activity activity);
+
+        void onActivityStopped(Activity activity);
+
+        void onActivitySaveInstanceState(Activity activity, android.os.Bundle outState);
+
+        void onActivityDestroyed(Activity activity);
+    }
 }
