@@ -112,7 +112,7 @@ public class Main {
                 if (cfg != null && !cfg.isEmpty()) {
                     loadConfigWithSpiderFallback(cfg, spiderUrl);
                 }
-                warmFirstSpider();
+                warmAllSpiders();
             } catch (Throwable t) {
                 System.err.println("[gateway] preload error (ignored): " + t);
             } finally {
@@ -126,31 +126,69 @@ public class Main {
     }
 
     /**
-     * Warm the first runnable spider source in the background. A spider's first
+     * Warm every runnable spider source in the background. A spider's first
      * homeContent() pays a one-time cost (UrlChecker domain probing + widening + first CMS
-     * fetch, ~5s for 瓜子) that the user would otherwise hit on their first source click.
-     * Triggering it here, off the request path, moves that cost into startup so the first
-     * real /home or /category returns instantly (also filling the 60s/15s result cache).
-     * Failures are swallowed — a source that can't be warmed is simply cold on first click.
+     * fetch) that the user would otherwise hit on their first source click. Some spiders
+     * (notably the T4 class behind 荐片/光影/奶酪) are far slower to cold-start on the
+     * desktop (their Android-native init throws and falls back to a long network probe,
+     * observed 69~129s) — well past the Player's 60s axios timeout, so a cold first click
+     * ends in "network request failed". Warming every csp source here, off the request path,
+     * moves that cost into startup and fills the result cache so the first real click is fast.
+     * Runs with bounded concurrency so one slow spider (T4) can't wedge the whole queue
+     * behind it. Failures are swallowed — a source that can't be warmed is simply cold on
+     * first click (and can still be warmed on demand via /warm?site=KEY).
      */
-    private static void warmFirstSpider() {
+    private static void warmAllSpiders() {
         Thread warmer = new Thread(() -> {
-            try {
-                Site target = null;
-                for (Site site : VodConfig.get().getSites()) {
-                    if (site.isSpider() && site.getApi().startsWith("csp_")) {
-                        target = site;
+            List<Site> targets = new ArrayList<>();
+            for (Site site : VodConfig.get().getSites()) {
+                if (site.isSpider() && site.getApi().startsWith("csp_")) {
+                    targets.add(site);
+                }
+            }
+            if (targets.isEmpty()) return;
+
+            // Put the default source first so the source the user is most likely to
+            // click gets warmed before the rest of the queue. The gateway has no
+            // knowledge of the Player's user-configured default, so fall back to the
+            // config's first site (home) as the closest proxy.
+            Site home = VodConfig.get().getHome();
+            if (home != null) {
+                String homeKey = home.getKey();
+                for (int i = 0; i < targets.size(); i++) {
+                    if (homeKey.equals(targets.get(i).getKey())) {
+                        targets.add(0, targets.remove(i));
                         break;
                     }
                 }
-                if (target == null) return;
-                long t0 = System.currentTimeMillis();
-                System.out.println("[gateway] warming first spider: " + target.getKey() + " (" + target.getApi() + ")");
-                com.fongmi.gateway.api.SiteApi.homeContent(target.getKey());
-                System.out.println("[gateway] warmed " + target.getKey() + " in " + (System.currentTimeMillis() - t0) + "ms");
-            } catch (Throwable t) {
-                System.err.println("[gateway] warm first spider failed (ignored): " + t);
             }
+
+            System.out.println("[gateway] warming " + targets.size() + " csp spider sources...");
+            int concurrency = Math.min(4, targets.size());
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+            java.util.concurrent.atomic.AtomicInteger warmed = new java.util.concurrent.atomic.AtomicInteger(0);
+            java.util.List<java.util.concurrent.Future<?>> futures = new ArrayList<>();
+            for (Site target : targets) {
+                futures.add(pool.submit(() -> {
+                    long t0 = System.currentTimeMillis();
+                    try {
+                        com.fongmi.gateway.api.SiteApi.homeContent(target.getKey());
+                        warmed.incrementAndGet();
+                        System.out.println("[gateway] warmed " + target.getKey() + " (" + target.getApi() + ") in "
+                                + (System.currentTimeMillis() - t0) + "ms");
+                    } catch (Throwable t) {
+                        System.err.println("[gateway] warm " + target.getKey() + " failed (ignored): " + t.getMessage());
+                    }
+                }));
+            }
+            for (java.util.concurrent.Future<?> f : futures) {
+                try {
+                    f.get();
+                } catch (Throwable ignored) {
+                }
+            }
+            pool.shutdown();
+            System.out.println("[gateway] warmed " + warmed.get() + "/" + targets.size() + " csp sources");
         }, "gateway-warm");
         warmer.setDaemon(true);
         warmer.start();

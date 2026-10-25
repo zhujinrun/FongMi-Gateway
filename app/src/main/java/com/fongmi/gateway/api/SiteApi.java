@@ -179,7 +179,11 @@ public class SiteApi {
             }
             result.addProperty("key", site.getKey());
             result.addProperty("siteName", site.getName());
-            cachePut(CACHE_HOME, HOME_BODY, key, result.toString(), HOME_TTL_MS);
+            // 空 list 的 home 结果不缓存：与 category 同理（见 categoryContent），若把空结果
+            // 缓存 60s，切源后会在 TTL 内持续拿到空首页，前端兜底与重试都救不回来。
+            if (!isCategoryEmpty(result.toString())) {
+                cachePut(CACHE_HOME, HOME_BODY, key, result.toString(), HOME_TTL_MS);
+            }
             return result.toString();
         }
         return httpGet(site, Map.of("filter", "true"));
