@@ -196,7 +196,11 @@ public class SiteApi {
             HashMap<String, String> ext = extend == null ? new HashMap<>() : new HashMap<>(extend);
             String category = spider(site).categoryContent(tid == null ? "" : tid, pg == null || pg.isEmpty() ? "1" : pg, filter, ext);
             String result = category == null || category.isEmpty() ? emptyList() : category;
-            cachePut(CACHE_CATEGORY, CATEGORY_BODY, cacheKey, result, CATEGORY_TTL_MS);
+            // 空列表不缓存：某些源对 tid=0（「最新」占位分类）等返回空是常态，若把空结果
+            // 缓存 15s，切源/切分类后会在 TTL 内持续拿到空列表，前端兜底与重试都救不回来。
+            if (!isCategoryEmpty(result)) {
+                cachePut(CACHE_CATEGORY, CATEGORY_BODY, cacheKey, result, CATEGORY_TTL_MS);
+            }
             return result;
         }
         Map<String, String> params = new HashMap<>();
@@ -557,6 +561,19 @@ public class SiteApi {
 
     private static String emptyList() {
         return "{\"page\":1,\"pagecount\":1,\"limit\":20,\"total\":0,\"list\":[],\"types\":[],\"filters\":{}}";
+    }
+
+    /** True when a category result carries no playable list (empty/absent), so it must not be cached. */
+    private static boolean isCategoryEmpty(String json) {
+        if (json == null || json.isEmpty()) return true;
+        try {
+            JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+            if (!o.has("list")) return true;
+            JsonElement list = o.get("list");
+            return !list.isJsonArray() || list.getAsJsonArray().size() == 0;
+        } catch (Throwable ignore) {
+            return true;
+        }
     }
 
     private static String emptyVod() {
