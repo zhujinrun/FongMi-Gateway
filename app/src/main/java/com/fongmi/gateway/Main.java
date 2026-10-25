@@ -15,7 +15,7 @@ import java.util.List;
 
 public class Main {
 
-    private static final String REPO = "https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/fongmi/jar/";
+    private static final String REPO = Repo.BASE;
     private static final String DEFAULT_SPIDER =
             REPO + "fty_spider.jar;md5;" + REPO + "fty_spider.jar.md5"
                     + "|" + REPO + "wex_spider.jar;md5;" + REPO + "wex_spider.jar.md5";

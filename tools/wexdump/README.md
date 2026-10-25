@@ -169,35 +169,48 @@ java -cp out:gateway.jar VerifyAll aligned.jar
 
 ---
 
-## 7. 预置翻译产物（bundled translation）
+## 7. 预翻译产物（prebuilt translation）
 
-桌面端无法自举翻译，所以把第 5.4 节产出的 jar **随网关分发**，运行时按内容指纹命中：
+桌面端无法自举翻译，所以把第 5.4 节产出的 jar 放到仓库的 `jar/prebuilt/`，
+与 `fty_spider.jar` / `wex_spider.jar` 走**同一条 gh-proxy 分发通道**：
 
 ```bash
 # 1. 算【源 jar】的 sha256 —— 配置里那个伪装成 jpg 的壳包，不是解密产物
 sha256sum b1a69d9c....jpg
 
-# 2. 产物按指纹命名放进来
-cp aligned.jar app/src/main/resources/prebuilt/<sha256>.jvm.jar
+# 2. 产物按指纹命名放进来（不要覆盖旧的，别的配置可能还在用）
+cp aligned.jar jar/prebuilt/<sha256>.jvm.jar
 
-# 3. 重新打包
-./gradlew fatJar
+# 3. 确认真的入库了 —— .gitignore 对 *.jvm.jar 有全局忽略，靠例外放行
+git check-ignore -v jar/prebuilt/<sha256>.jvm.jar   # 期望无输出
 ```
 
-运行时链路：`JarLoader.ensureJvmClasses()` → `Prebuilt.install()` 算源 jar 的 sha256 →
-命中则释放成缓存里的 `<源 jar 名>.jvm.jar` 并直接交给 `URLClassLoader`，完全跳过 d2j。
+运行时链路：`JarLoader.ensureJvmClasses()` → `Prebuilt.install()` 判壳（含
+`assets/*.guard` 才继续）→ 算源 jar 的 sha256 → 按 `<repo>/prebuilt/<sha256>.jvm.jar`
+经镜像链拉取 → 落到缓存里的 `<源 jar 名>.jvm.jar` 直接交给 `URLClassLoader`，跳过 d2j。
+**每台机器只下载一次**，之后按 mtime 复用。
+
+**为什么走远程而不是打进 gateway.jar**：这个配置的载荷带日期（几天一换），上游一更新就得
+重跑流水线。打进包意味着每次都要重新发一版播放器；放仓库则推一次提交，所有用户下次启动
+自动拿到，包体也不用每人多背 2MB。
 
 **为什么用 sha256 而不是配置里的 `;md5;`**：配置可能根本不写 md5，上游也可能重新打包导致
-整包 md5 变化而内容等价；内容指纹能同时覆盖这两种情况。反过来，上游一改载荷指纹就变 → 命中不了
-→ 回到「requires Android native/Dex」提示，**绝不会把旧版本的类塞给新载荷**。
+整包 md5 变化而内容等价；内容指纹能同时覆盖这两种情况。反过来，载荷一旦真变，指纹跟着变 →
+拉不到 → 回落 d2j 并保持「requires Android native/Dex」提示，
+**绝不会把旧版本的类塞给新载荷**。
 
-实测（2026-10-25，源 md5 `3c264c62...` / sha256 `9e82d905...`）：
+**为什么不是公共池**：`jar/wex_spider.jar` 那种池是所有配置无条件挂载的；本产物是
+**某个配置私有**的（类名与业务逻辑绑定那一份载荷），只在对应指纹出现时才拉。实测该配置的
+99 个源里，公共池（fty + wex）只能覆盖 10 个。
+
+实测（2026-10-25，源 md5 `3c264c62...` / sha256 `9e82d905...`，`-Dgateway.repo` 指向本地服务模拟通道）：
 
 | 场景 | 结果 |
 | --- | --- |
-| 原始配置（99 个 site，带 `;md5;`） | `prebuilt translation hit` → `spider coverage: 99/99` |
-| 同一文件但配置去掉 `;md5;` | 同样命中 → `99/99`（证明不依赖配置声明） |
-| 壳包重新打包（字节等价、sha256 不同） | 不命中 → 走 d2j → 正确降级为 `10/99` + 不支持提示 |
+| 指纹已收录 | `prebuilt translation fetched` → `spider coverage: 99/99` |
+| 同一缓冲区二次启动 | 无 `fetched`，直接复用缓存 → `99/99` |
+| 壳包重新打包（字节等价、sha256 不同） | 拉不到 → 走 d2j → 正确降级为 `10/99` + 不支持提示 |
+| 公共池 `wex_spider.jar`（也是 dex-only） | 被 `looksGuarded` 拦掉，不产生无谓请求 |
 
 功能验证（真实配置、真实 `csp_AiNewGuanYingGuard` 类名）：
 
@@ -209,8 +222,8 @@ GET /home?site=AiNewGuanYing
 注意配置里的 `csp_XxxGuard` 会自动回退到 `csp_Xxx`（`JarLoader.loadSpiderClass`），
 因为解密后的 dex 里只有不带 `Guard` 后缀的真实类名。
 
-**分发代价**：每个预置产物让 `gateway.jar` 增加约 2MB。产物失效后（上游升级）不会自动消失，
-需要人工替换或删除 `prebuilt/` 下的对应文件 —— 这是刻意的，避免未经 dump 验证的翻译被误用。
+**镜像覆盖**：`-Dgateway.repo=<url>` 可以把 `jar/` 通道指到自建镜像或本地目录
+（测试时就是这样把 `Repo.BASE` 指到 `http://127.0.0.1:8123/` 的）。
 
 ---
 
