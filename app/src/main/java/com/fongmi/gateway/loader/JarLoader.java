@@ -232,6 +232,12 @@ public class JarLoader {
         if (!hasDex(file)) throw new Exception("jar has neither classes nor dex: " + file.getName());
         File out = new File(file.getParentFile(), file.getName() + ".jvm.jar");
         if (Path.exists(out) && out.lastModified() >= file.lastModified()) return out;
+        // Guarded shells cannot be translated in-process (see Prebuilt); use the bundled
+        // translation when the source bytes match exactly, otherwise fall through to d2j.
+        if (Prebuilt.install(file, out)) {
+            out.setLastModified(file.lastModified());
+            return out;
+        }
         Dex2Jar.convert(file, out);
         if (!Path.exists(out)) throw new Exception("dex2jar failed: " + file.getName());
         return out;

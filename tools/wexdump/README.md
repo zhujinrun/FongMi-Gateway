@@ -164,14 +164,57 @@ java -cp out:gateway.jar VerifyAll aligned.jar
   `TypeToken must be created with a type argument`。这个**无法在桌面端修补**。
 - **载荷会滚动更新**：配置里的 `spider` 带日期与 md5
   （`.../2026/10/23/<hash>.jpg;md5;<hash>`）。新版本要重跑第 4、5 节。
-- 网关目前**不会**在运行时做这套翻译：`Dex2Jar` 仍走 d2j，所以加固壳 jar 会被判为
-  「无法运行」并提示为不支持，而不是静默出「无数据」。要让它真跑起来，把第 5.3 节产出的
-  `<name>.jvm.jar` 放到缓存 jar 旁边即可 —— `JarLoader.ensureJvmClasses()` 见到 `.class`
-  条目会直接复用，不再经过 d2j。
+- 网关**不会**在运行时做这套翻译：`Dex2Jar` 仍走 d2j，加固壳 jar 会被判为「无法运行」并提示
+  为不支持，而不是静默出「无数据」。要让它真跑起来，走第 7 节的预置产物。
 
 ---
 
-## 7. 脚本清单
+## 7. 预置翻译产物（bundled translation）
+
+桌面端无法自举翻译，所以把第 5.4 节产出的 jar **随网关分发**，运行时按内容指纹命中：
+
+```bash
+# 1. 算【源 jar】的 sha256 —— 配置里那个伪装成 jpg 的壳包，不是解密产物
+sha256sum b1a69d9c....jpg
+
+# 2. 产物按指纹命名放进来
+cp aligned.jar app/src/main/resources/prebuilt/<sha256>.jvm.jar
+
+# 3. 重新打包
+./gradlew fatJar
+```
+
+运行时链路：`JarLoader.ensureJvmClasses()` → `Prebuilt.install()` 算源 jar 的 sha256 →
+命中则释放成缓存里的 `<源 jar 名>.jvm.jar` 并直接交给 `URLClassLoader`，完全跳过 d2j。
+
+**为什么用 sha256 而不是配置里的 `;md5;`**：配置可能根本不写 md5，上游也可能重新打包导致
+整包 md5 变化而内容等价；内容指纹能同时覆盖这两种情况。反过来，上游一改载荷指纹就变 → 命中不了
+→ 回到「requires Android native/Dex」提示，**绝不会把旧版本的类塞给新载荷**。
+
+实测（2026-10-25，源 md5 `3c264c62...` / sha256 `9e82d905...`）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 原始配置（99 个 site，带 `;md5;`） | `prebuilt translation hit` → `spider coverage: 99/99` |
+| 同一文件但配置去掉 `;md5;` | 同样命中 → `99/99`（证明不依赖配置声明） |
+| 壳包重新打包（字节等价、sha256 不同） | 不命中 → 走 d2j → 正确降级为 `10/99` + 不支持提示 |
+
+功能验证（真实配置、真实 `csp_AiNewGuanYingGuard` 类名）：
+
+```
+GET /home?site=AiNewGuanYing
+→ 200, classes=[mv,tv,ac], filters=8 个维度, 类型选项 39 个
+```
+
+注意配置里的 `csp_XxxGuard` 会自动回退到 `csp_Xxx`（`JarLoader.loadSpiderClass`），
+因为解密后的 dex 里只有不带 `Guard` 后缀的真实类名。
+
+**分发代价**：每个预置产物让 `gateway.jar` 增加约 2MB。产物失效后（上游升级）不会自动消失，
+需要人工替换或删除 `prebuilt/` 下的对应文件 —— 这是刻意的，避免未经 dump 验证的翻译被误用。
+
+---
+
+## 8. 脚本清单
 
 | 文件 | 作用 |
 | --- | --- |

@@ -25,6 +25,8 @@ local.properties
 *.tmp
 *.bak
 *.jvm.jar
+# ...except the bundled translations: those are distribution content, not cache
+!app/src/main/resources/prebuilt/*.jvm.jar
 
 # OS
 .DS_Store
