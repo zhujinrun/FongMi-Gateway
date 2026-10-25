@@ -24,6 +24,7 @@ local.properties
 *.log
 *.tmp
 *.bak
+*.jvm.jar
 
 # OS
 .DS_Store
