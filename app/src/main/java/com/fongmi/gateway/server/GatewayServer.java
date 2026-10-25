@@ -885,7 +885,30 @@ public class GatewayServer {
         o.addProperty("ready", VodConfig.get().isReady());
         GsonHolder.GSON.toJsonTree(VodConfig.get().summary()).getAsJsonObject().entrySet()
                 .forEach(e -> o.add("config." + e.getKey(), e.getValue()));
+        int[] cov = cspCoverage();
+        o.addProperty("siteOk", cov[0]);
+        o.addProperty("siteMissing", cov[1]);
         return o;
+    }
+
+    /**
+     * [可运行源数, 跑不了的源数]。桌面网关只能加载纯 JVM 爬虫 jar；安卓专属壳
+     * （DexClassLoader + .so，典型是王二小新版配置）里的类在池里解析不到。
+     * 前端据此把源标成「不支持」，而不是等一次注定失败的 /home 再显示「无数据」。
+     */
+    private static int[] cspCoverage() {
+        int ok = 0;
+        int missing = 0;
+        try {
+            for (Site site : VodConfig.get().getSites()) {
+                String api = site.getApi();
+                if (api == null || !api.startsWith("csp_")) continue;
+                if (BaseLoader.get().hasSpider(api)) ok++;
+                else missing++;
+            }
+        } catch (Throwable ignored) {
+        }
+        return new int[]{ok, missing};
     }
 
     /**
@@ -953,6 +976,8 @@ public class GatewayServer {
             m.put("hide", site.getHide());
             m.put("indexs", site.getIndexs());
             m.put("timeout", site.getTimeout());
+            // 本机能否真的跑起来（安卓专属爬虫 / 池里缺类 都为 false），前端据此禁用并标「不支持」
+            m.put("supported", BaseLoader.get().hasSpider(site.getApi()));
             list.add(m);
         }
         return list;
