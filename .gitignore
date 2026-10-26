@@ -35,3 +35,4 @@ Thumbs.db
 # Runtime data (if run from repo)
 cache/
 data1/
+.probe

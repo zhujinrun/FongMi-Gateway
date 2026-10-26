@@ -152,6 +152,43 @@ java -cp out:gateway.jar VerifyAll aligned.jar
 
 期望：`verifyError=0`。`missing` 是 Android SDK 类缺失，属于预期（网关只桩了用到的那些）。
 
+### 5.5 重建 Gson 的泛型签名
+
+R8 默认不带 `-keepattributes Signature`，所以载荷里 **13 个 `TypeToken` 匿名子类**全部丢了
+`<List<X>>` 这一段。每个子类被构造时 `getGenericSuperclass()` 只能拿到裸 `TypeToken`，
+直接抛 `IllegalStateException: TypeToken must be created with a type argument`。
+
+实测在一个 99 源的配置里，**34 个源**栽在这一处 —— 是单一最大病因（超过 DNS 失效和超时之和）。
+
+**怎么把类型参数找回来**：载荷是多个开源 CatVod spider 合并的，这类匿名类只被一个
+bean 的 `arrayFrom` 一类的方法用，上游写的就是 `TypeToken.getParameterized(List.class, Item.class)`。
+交叉验证靠三件事：
+
+| 手段 | 用法 |
+| --- | --- |
+| 常量池找使用方 | 谁有该子类的 `Class` 常量 → 谁构造它（`bytecode.members_of_type` 定位到具体方法） |
+| 找 `checkcast` | 反序列化结果被 cast 成什么 → 元素类型（如 `AList` cast 到 `merge/l/b`） |
+| 找同类字段读 | `l0/d.f()` 把 `l0/d.i()` 返回的列表元素 cast 到 `merge/l0/g` |
+
+**两个必须一起补的地方**（只补前者会在 `defineClass` 之后炸在反射层）：
+
+1. 子类的类级 `Signature`：`Lcom/.../f1/a<Ljava/util/List<Lcom/.../X;>;>;`
+2. **`f1.a` 自己**的类级 `Signature`：`<T:Ljava/lang/Object;>Ljava/lang/Object;`
+   —— 它的 `<T>` 也被剥了，只补子类会得到
+   `MalformedParameterizedTypeException: 0 formal argument(s) 1 actual argument(s)`。
+
+容易踩的细节：`Signature` 属性的 `attribute_length` 恒为 **2**，属性体只放一个
+指向常量池 Utf8 的 u2 索引；把签名字符串直接写进属性体会得到
+`ClassFormatError: Wrong Signature attribute length`。
+
+```bash
+python gsonparams.py <aligned.jar> <out.jar>        # 幂等，跑两次结果一致
+java SigProbe.java <out.jar> com.github.catvod.spider.merge.k.f   # 反射层自检
+```
+
+签名表 `SIGNATURES` 里每一条都带证据注释。**载荷换代后必须重跑**：类名是 R8 分配的，
+新载荷里 `merge/k/f` 完全可能是别的东西，映射不通用。
+
 ---
 
 ## 6. 已知边界
@@ -159,9 +196,9 @@ java -cp out:gateway.jar VerifyAll aligned.jar
 - **`libwex_v8.so` 的 `LoadNiMa.decode` 路径在桌面端不可能跑**：那是 native 解密/签名逻辑，
   没有 x86_64 实现。走到这条路径的源注定失败，`JarLoader` 会把它归为
   「requires Android native/Dex」。
-- **R8 剥离泛型签名**：`grep -aoc "<T:" real.dex` = 1（本该有大量 `Signature` 属性）。
+- **R8 剥离泛型签名，但可以重建**：整个 jar 里 `Signature` 属性为 **0 个**，
   Gson 的 `TypeToken` 靠 `getGenericSuperclass()` 拿类型参数，签名一没就抛
-  `TypeToken must be created with a type argument`。这个**无法在桌面端修补**。
+  `TypeToken must be created with a type argument`。修复见第 5.5 节。
 - **载荷会滚动更新**：配置里的 `spider` 带日期与 md5
   （`.../2026/10/23/<hash>.jpg;md5;<hash>`）。新版本要重跑第 4、5 节。
 - 网关**不会**在运行时做这套翻译：`Dex2Jar` 仍走 d2j，加固壳 jar 会被判为「无法运行」并提示
@@ -237,3 +274,11 @@ GET /home?site=AiNewGuanYing
 | `fixalign.py` | 用 dex 真值 + LCS 对齐修 d2j 产物（仅在第 5.2 节最后那条死路上需要） |
 | `InitAlign.java` | 对齐 R8 构造器上提并重算 StackMapTable（**必跑**） |
 | `VerifyAll.java` | 强制 link 全部类，统计 `VerifyError` |
+| `classfile.py` | 极简 class 文件读写：往返字节一致，可追加类级 `Signature` 属性 |
+| `bytecode.py` | 指令长度表 + 线性扫描，定位「哪个方法 `new` 了某个类」「谁 `checkcast` 成什么」 |
+| `gsonparams.py` | 按证据表给 `TypeToken` 匿名子类补 `<类型参数>`，并给 `f1.a` 自己补 `<T>`（第 5.5 节） |
+| `SigProbe.java` | 反射层自检：直接打印 `getGenericSuperclass()` 的真实返回，字节对不代表反射可用 |
+
+`gsonparams.py` 是**数据级修复**：产物仍然放在 `jar/prebuilt/<源 sha256>.jvm.jar`，
+网关和播放器都不用改代码、不用重发版本。重新生成时同名覆盖即可（指纹取自源 jar，
+上游载荷不变就还是同一个文件名）。
