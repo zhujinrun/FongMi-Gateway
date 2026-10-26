@@ -63,3 +63,17 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
         验证: 真实配置 99 个 site → coverage 99/99；观影源 /home 返回 3 分类 8 筛选维度 39 类型
               Player 端到端：film/class + film/search + film/detail 三项全通
         注意: 该配置的 99 个源里，公共池（fty+wex）只能覆盖 10 个，其余 89 个靠这份产物
+
+    f35f5ae50ffd07f4ff9fb63a2ecf0bde6dfcf4dcfd210e6df08c107d72edd9c5
+        源: http://oss4liview.moji.com/thd_file/2026/10/26/837a77b77fc98aba6b97856944e94d7c.jpg
+            (md5 722d5c1bdcb1b38fc62874941e060d6b, 1010202 B)
+        产物: 【指纹别名】与 9e82d905 同一份字节（同 md5 6505c284…），非重跑流水线
+        来由: 2026-10-26 上游只重打包了壳（sha256 换成 f35f5ae5…），Prebuilt 按
+              源 jar 的 sha256 查表，旧键查不到就回落 d2j → 89 站 ClassNotFound。
+              实测新旧 guard 载荷差约 3KB（946288 vs 943142 B）但旧译码产物仍兼容，
+              故复制一份挂新指纹即可，成本约 1 分钟。
+        校验: <sha256>.jvm.jar.md5 = 6505c284c6ed1703c23203dcfc34588d（同上，字节相同）
+        验证: 2026-10-26 换代后实测：coverage 99/99；homeContent 58/99 出数、
+              58/58 全标准键；AiNewLaBi search「斗罗」→ detail 683KB 五条网盘线路
+        注意: 别名是权宜——新载荷那 ~3KB 差异没有跟进译码。下次换代若 API 契约变了
+              会静默出空数据，此时才需要重跑 tools/wexdump（约半小时）。
