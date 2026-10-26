@@ -26,6 +26,25 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
     「requires Android native/Dex」并提示不支持，不会静默出「无数据」。
     所以这里缺文件是安全降级，不是错误。
 
+完整性校验（强制，2026-10-26）：
+    每个产物旁必须挂 <sha256>.jvm.jar.md5（32 位小写 hex + CRLF，与
+    fty_spider.jar.md5 / wex_spider.jar.md5 同格式）。Prebuilt.install 会先取
+    这个 .md5，再比对下载到的字节：
+
+        md5 匹配   → 落盘安装
+        md5 不匹配 → 拒绝，记 [jar] prebuilt md5 mismatch
+        .md5 缺失/非法 → 拒绝，记 [jar] prebuilt md5 missing or invalid
+
+    后两种都回落 d2j 并提示「需 Android native」，绝不会把校验不过的字节装进 JVM。
+    这是硬门禁不是建议 —— 防的是镜像/CDN 投毒、缓存被换、半截下载。
+    注意 .md5 与产物走同一通道，挡不住能同时篡改两端的中间人；真正的防篡改
+    靠「谁有权推仓库」。指纹（sha256）是【源】jar 的，md5 是【产物】的，
+    两者校验的是不同东西，不能互相替代。
+
+    ⚠ 新增产物时必须同时生成 .md5，否则运行时会拒绝安装（安全降级，不是报错）：
+        certutil -hashfile <sha256>.jvm.jar MD5
+        → 把 32 位 hex 写进 <sha256>.jvm.jar.md5（CRLF 结尾，一行）
+
 维护：
     上游改载荷 → sha256 变 → 旧文件自动失效且不会被误用。重跑 tools/wexdump
     流水线，把产物按新指纹命名追加即可（不要覆盖旧的，旧配置可能还在用）。
@@ -40,5 +59,7 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
         源: http://oss4liview.moji.com/thd_file/2026/10/23/b1a69d9c535fd309388e390b0b1e0749.jpg
             (md5 3c264c629e02273b9ad61e769218c508, 1006882 B)
         产物: 1163 类 / 7863 方法，enjarify + InitAlign（rewritten=796 rejected=0）
+        校验: <sha256>.jvm.jar.md5 = 6505c284c6ed1703c23203dcfc34588d
         验证: 真实配置 99 个 site → coverage 99/99；观影源 /home 返回 3 分类 8 筛选维度 39 类型
+              Player 端到端：film/class + film/search + film/detail 三项全通
         注意: 该配置的 99 个源里，公共池（fty+wex）只能覆盖 10 个，其余 89 个靠这份产物

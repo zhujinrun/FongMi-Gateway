@@ -330,7 +330,15 @@ GET /home?site=AiNewGuanYing
 | `bytecode.py` | 指令长度表 + 线性扫描，定位「哪个方法 `new` 了某个类」「谁 `checkcast` 成什么」 |
 | `gsonparams.py` | 按证据表给 `TypeToken` 匿名子类补 `<类型参数>`，并给 `f1.a` 自己补 `<T>`（第 5.5 节） |
 | `SigProbe.java` | 反射层自检：直接打印 `getGenericSuperclass()` 的真实返回，字节对不代表反射可用 |
+| `gsonfields.py` | 给 bean 字段注入 `@SerializedName`（含 `@Retention(RUNTIME)` 元注解，见第 5.6 节） |
+| `AnnoDump.java` | 诊断注解类形状与 `getDeclaredAnnotations()` 是否真被 JVM 认可 |
+| `FieldProbe.java` | 用载荷自带 Gson 真实序列化，逐字段核对输出键名 |
+| `Md5Probe.java` | 4 用例测 `Prebuilt.install` 完整性门禁：好 md5 / 篡改 / 缺失 / 非法，须 4/4 |
 
 `gsonparams.py` 是**数据级修复**：产物仍然放在 `jar/prebuilt/<源 sha256>.jvm.jar`，
 网关和播放器都不用改代码、不用重发版本。重新生成时同名覆盖即可（指纹取自源 jar，
 上游载荷不变就还是同一个文件名）。
+
+⚠ 新产物必须**同时**生成 `<sha256>.jvm.jar.md5`（32 位小写 hex + CRLF），
+否则 `Prebuilt.install` 会拒绝安装并回落 d2j（安全降级）。生成方式见
+`jar/prebuilt/README.txt`；`Md5Probe` 可在提交前自检门禁是否生效。

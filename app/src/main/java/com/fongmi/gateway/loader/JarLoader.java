@@ -192,7 +192,8 @@ public class JarLoader {
         return new ArrayList<>(out);
     }
 
-    private String fetchText(String url) {
+    /** Fetch a small text resource (a checksum file) via the mirror chain. Empty on failure. */
+    static String fetchText(String url) {
         for (String cand : expand(url)) {
             try (var res = com.github.catvod.net.OkHttp.newCall(cand).execute()) {
                 if (res.body() != null) {
