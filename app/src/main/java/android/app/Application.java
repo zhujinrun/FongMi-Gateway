@@ -1,8 +1,9 @@
 package android.app;
 
-import android.content.Context;
+import android.content.ContextWrapper;
 
-public class Application extends Context {
+/** Platform-faithful: {@code Application extends ContextWrapper}. */
+public class Application extends ContextWrapper {
     private static Application instance = new Application();
 
     public static Application get() {

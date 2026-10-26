@@ -1,11 +1,16 @@
 package android.app;
 
-import android.content.Context;
+import android.content.ContextWrapper;
 import android.content.Intent;
 import android.view.View;
 import android.view.ViewGroup;
 
-public class Activity extends Context {
+/**
+ * Mirrors the platform hierarchy ({@code Activity extends ContextThemeWrapper extends ContextWrapper}):
+ * protected jars pass their Activity where a {@code ContextWrapper} is expected, so a plain
+ * {@code extends Context} fails verification with "Bad type on operand stack".
+ */
+public class Activity extends ContextWrapper {
 
     private Intent intent = new Intent();
 
