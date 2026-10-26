@@ -189,6 +189,58 @@ java SigProbe.java <out.jar> com.github.catvod.spider.merge.k.f   # 反射层自
 签名表 `SIGNATURES` 里每一条都带证据注释。**载荷换代后必须重跑**：类名是 R8 分配的，
 新载荷里 `merge/k/f` 完全可能是别的东西，映射不通用。
 
+### 5.6 重建 Gson 的 `@SerializedName`
+
+5.5 修完之后还有一层，而且这一层才是"数据明明取到了、界面却是空的"的真正原因。
+
+R8 会同时做两件事：把 bean 字段名改成 `a`/`b`/`c`，以及把 `@SerializedName` 注解整个删掉
+（全 jar 的 `RuntimeVisibleAnnotations` 属性数为 **0**）。于是 Gson 的
+`ReflectiveTypeAdapterFactory` 走 `annotation == null` 分支，退化成 `field.getName()`，
+序列化出来就是：
+
+```
+{"a":[{"a":"1","b":"电影"}],"b":[{"b":"147594","c":"嫁金钗","d":"...","e":"(18/30)"}]}
+```
+
+播放器只认 `class` / `list` / `vod_id` / `vod_name`，所以这些源数据齐全却渲染为空。
+这也解释了"搜索只有 B 站能出结果"——只有那几个手写 JSON 的源是标准键。
+
+**注解类本身还在**：`merge/z0/b`（`value() -> String`，`alternate() -> String[]`），
+`merge/b1/z`（`ReflectiveTypeAdapterFactory`）也还在调 `field.getAnnotation()`。
+被删掉的只是*使用点*，这正是 `gsonfields.py` 补回去的东西。
+
+**两个会让修复静默失败的坑**，都必须处理：
+
+1. **注解类的 `@Retention(RUNTIME)` 也被剥了**。字段上明明写着格式正确的
+   `RuntimeVisibleAnnotations`，`javap -v` 也能看见，但 JVM 把注解视为 CLASS-retained，
+   `Field.getDeclaredAnnotations()` 直接返回**空数组**——`getAnnotation()` 得到 `null`，
+   Gson 照旧用字段名。这是最难发现的一种失败：字节层面完全正确，运行时完全无效。
+   所以 `merge/z0/b` 自己也要补 `@Retention(RUNTIME)` 和 `@Target({FIELD, METHOD})`。
+2. **`alternate()` 的 `AnnotationDefault` 也被剥了**。只补 `value` 的话，Gson 一读
+   `annotation.alternate()` 就抛 `IncompleteAnnotationException: missing element alternate`。
+   注入时显式写一个空数组元素 `alternate = {}`。
+
+**字段语义怎么定**：不看上游源码去猜顺序（顺序对不上——`merge/k/k` 的构造器跳过了 `a`，
+所以序列化结果从 `b` 开始），而是读**构造对象的字节码**：构造器把第几个参数写进哪个字段，
+调用点又用 `optString("vodId")` 这类键取的值。两边一对，语义就锁死了。例如：
+
+```java
+// merge/k/k.<init>(String,String,String,String)
+this.b = arg1;  this.c = arg2;  this.k(arg3);  this.e = arg4;
+// 调用点 WexAiWenCai.c(JSONArray)
+new k.k(o.optString("vodId"), o.optString("vodName"), o.optString("vodPic"), o.optString("vodRemarks"))
+// ⇒ b=vod_id, c=vod_name, d=vod_pic（d 由 setter k() 写，k() 是图片 URL 的 Referer 修正）, e=vod_remarks
+```
+
+```bash
+python gsonfields.py <in.jar> <out.jar>
+java -cp "<gateway.jar>;." AnnoDump  <out.jar> com.github.catvod.spider.merge.z0.b com.github.catvod.spider.merge.k.b
+java -cp "<gateway.jar>;." FieldProbe <out.jar> com.github.catvod.spider.merge.z0.b com.github.catvod.spider.merge.y0.m "com.github.catvod.spider.merge.k.b=id1,x,1"
+```
+
+`AnnoDump` 查注解是否真被 JVM 认可（坑 1 只有它能暴露），`FieldProbe` 用载荷自带的 Gson
+真的序列化一次（坑 2 只有它能暴露）。两个都得跑，只做字节检查会两次都是"看起来成功"。
+
 ---
 
 ## 6. 已知边界

@@ -134,9 +134,68 @@ class ClassFile:
         attrs, _ = self.class_level_attributes()
         return any(name == 'Signature' for name, _ in attrs)
 
+    def parse_members(self):
+        """Split the members block into fields, methods and class attributes.
+
+        Each member is [access, name_index, descriptor_index, [(attr_name_idx, body)]].
+        Needed because injecting a field annotation means rewriting the field
+        table, and the members block is the only part of the class that is not
+        fixed-stride."""
+        tail = self.tail
+        pos = 0
+
+        def read_attrs(pos):
+            n = struct.unpack('>H', tail[pos:pos + 2])[0]
+            pos += 2
+            attrs = []
+            for _ in range(n):
+                ni = struct.unpack('>H', tail[pos:pos + 2])[0]
+                al = struct.unpack('>I', tail[pos + 2:pos + 6])[0]
+                attrs.append((ni, tail[pos + 6:pos + 6 + al]))
+                pos += 6 + al
+            return pos, attrs
+
+        fields = []
+        n = struct.unpack('>H', tail[pos:pos + 2])[0]
+        pos += 2
+        for _ in range(n):
+            acc, ni, di = struct.unpack('>HHH', tail[pos:pos + 6])
+            pos += 6
+            pos, attrs = read_attrs(pos)
+            fields.append([acc, ni, di, attrs])
+
+        methods = []
+        n = struct.unpack('>H', tail[pos:pos + 2])[0]
+        pos += 2
+        for _ in range(n):
+            acc, ni, di = struct.unpack('>HHH', tail[pos:pos + 6])
+            pos += 6
+            pos, attrs = read_attrs(pos)
+            methods.append([acc, ni, di, attrs])
+
+        attrs, _ = self.class_level_attributes()
+        return fields, methods, attrs
+
+    @staticmethod
+    def _emit_member(member):
+        acc, ni, di, attrs = member
+        out = struct.pack('>HHH', acc, ni, di)
+        out += struct.pack('>H', len(attrs))
+        for an, ab in attrs:
+            out += struct.pack('>HI', an, len(ab)) + ab
+        return out
+
     # ------------------------------------------------------------- write
-    def to_bytes(self, add_signature=None):
-        """Serialize. `add_signature` appends one class-level Signature attr."""
+    def to_bytes(self, add_signature=None, field_annotations=None, class_annotations=None):
+        """Serialize, optionally adding attributes.
+
+        `add_signature`   appends one class-level Signature attribute.
+        `field_annotations` is {field_name: [(annotation_type_desc, value)]}
+                          and appends RuntimeVisibleAnnotations to that field.
+                          Both are needed by the Gson recovery pipeline: the
+                          first restores TypeToken's own <T>, the second
+                          restores @SerializedName on the renamed bean fields.
+        """
         cp = self.cp[:]
         count = self.cp_count
 
@@ -145,20 +204,55 @@ class ClassFile:
             idx = self.find_utf8(s)
             if idx:
                 return idx
-            raw = s.encode('utf-8')
             cp.append((UTF8, s))
             count += 1
             return count - 1
 
-        attr_bytes = b''
-        extra = 0
+        fields, methods, cattr = self.parse_members()
+
+        if field_annotations:
+            rva_name = add_utf8('RuntimeVisibleAnnotations')
+            by_name = {self.utf8(f[1]): f for f in fields}
+            for fname, entries in field_annotations.items():
+                field = by_name.get(fname)
+                if field is None:
+                    raise KeyError('%s has no field %r' % (self.name, fname))
+                anns = b''
+                for entry in entries:
+                    if len(entry) == 2 and isinstance(entry[1], str):
+                        desc, value = entry                # shorthand (desc, string)
+                        anns += _annotation(add_utf8, desc, [('value', 's', value)])
+                    else:
+                        anns += _annotation(add_utf8, entry[0], entry[1])
+                for i, (an, ab) in enumerate(field[3]):
+                    if self.utf8(an) == 'RuntimeVisibleAnnotations':
+                        n = struct.unpack('>H', ab[:2])[0]
+                        field[3][i] = (an, struct.pack('>H', n + len(entries)) + ab[2:] + anns)
+                        break
+                else:
+                    body = struct.pack('>H', len(entries)) + anns
+                    field[3].append((rva_name, body))
+
+        if class_annotations:
+            rva_name = add_utf8('RuntimeVisibleAnnotations')
+            anns = b''
+            for type_desc, elements in class_annotations:
+                anns += _annotation(add_utf8, type_desc, elements)
+            cattr = list(cattr)
+            for i, (an, ab) in enumerate(cattr):
+                if self.utf8(an) == 'RuntimeVisibleAnnotations':
+                    n = struct.unpack('>H', ab[:2])[0]
+                    cattr[i] = (an, struct.pack('>H', n + len(class_annotations)) + ab[2:] + anns)
+                    break
+            else:
+                cattr.append((rva_name, struct.pack('>H', len(class_annotations)) + anns))
+
         if add_signature is not None:
             # Signature is { u2 signature_index; } -- the string lives in the
             # constant pool, the attribute body is just the index.
             name_idx = add_utf8('Signature')
             sig_idx = add_utf8(add_signature)
-            attr_bytes = struct.pack('>HIH', name_idx, 2, sig_idx)
-            extra = 1
+            cattr = list(cattr) + [(name_idx, struct.pack('>H', sig_idx))]
 
         # rebuild constant pool
         out = bytearray()
@@ -174,23 +268,43 @@ class ClassFile:
                 out += struct.pack('>H', len(raw)) + raw
             else:
                 out += val
-        # header tail: access..interfaces, then the original members block
-        hdr = struct.pack('>HHH', self.access, self.this_class, self.super_class)
-        hdr += struct.pack('>H', len(self.interfaces))
+        out += struct.pack('>HHH', self.access, self.this_class, self.super_class)
+        out += struct.pack('>H', len(self.interfaces))
         if self.interfaces:
-            hdr += struct.pack('>%dH' % len(self.interfaces), *self.interfaces)
-        out += hdr
-        out += self.tail
-
-        if extra:
-            attrs, count_pos = self.class_level_attributes()
-            base = len(out) - len(self.tail)           # start of the members block
-            abs_pos = base + count_pos                 # position of attribute_count
-            new_count = struct.pack('>H', len(attrs) + extra)
-            # The attribute table is the final section, so the new attribute goes
-            # at the very end -- right after the existing entries.
-            return bytes(out[:abs_pos]) + new_count + bytes(out[abs_pos + 2:]) + attr_bytes
+            out += struct.pack('>%dH' % len(self.interfaces), *self.interfaces)
+        out += struct.pack('>H', len(fields))
+        for f in fields:
+            out += self._emit_member(f)
+        out += struct.pack('>H', len(methods))
+        for m in methods:
+            out += self._emit_member(m)
+        out += struct.pack('>H', len(cattr))
+        for an, ab in cattr:
+            out += struct.pack('>HI', an, len(ab)) + ab
         return bytes(out)
+
+
+def _element_value(add_utf8, kind, payload):
+    """Encode one element_value. Only the kinds the recovery pipeline needs."""
+    if kind == 's':
+        return b's' + struct.pack('>H', add_utf8(payload))
+    if kind == 'e':                                  # enum constant
+        type_desc, const = payload
+        return b'e' + struct.pack('>HH', add_utf8(type_desc), add_utf8(const))
+    if kind == 'array':
+        out = b'[' + struct.pack('>H', len(payload))
+        for sub_kind, sub_payload in payload:
+            out += _element_value(add_utf8, sub_kind, sub_payload)
+        return out
+    raise ValueError('unsupported element kind %r' % kind)
+
+
+def _annotation(add_utf8, type_desc, elements):
+    """Encode one annotation. `elements` is [(name, kind, payload)]."""
+    out = struct.pack('>HH', add_utf8(type_desc), len(elements))
+    for name, kind, payload in elements:
+        out += struct.pack('>H', add_utf8(name)) + _element_value(add_utf8, kind, payload)
+    return out
 
 
 def selftest(path):
