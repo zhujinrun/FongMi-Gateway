@@ -64,19 +64,37 @@ FIELDS = {
         'b': 'type_name',
         'c': 'type_flag',
     },
-    # Vod bean. merge/k/k's four-arg constructor assigns
-    #   b = arg1, c = arg2, d = arg3 (via setter k(), the image-url fixup),
-    #   e = arg4
-    # and WexAiWenCai.c(JSONArray) passes
-    #   optString("vodId"), optString("vodName"), optString("vodPic"),
-    #   optString("vodRemarks")
-    # in that exact order. Field a is never assigned by any constructor, which
-    # is why the serialized object starts at b.
+    # Vod bean. merge/k/k has 14 String fields (a–n) + 1 Style (o).
+    # Four-arg constructor assigns b/c/d/e; the remaining fields are set via
+    # one-letter setters whose targets were read from putfield opcodes:
+    #   d→a  e→h  f→g  g→j  h→i  i→b  j→c  k→d  l→k  m→l  n→e  o→m  p→f
+    # Semantic names come from the live detail response for 花卷 id=18879
+    # (嫁金钗), whose values are self-describing:
+    #   a="剧情,爱情,古装"  → vod_tag
+    #   f="2026"           → vod_year
+    #   g="大陆"            → vod_area
+    #   h="田曦薇,闫桉,…"   → vod_actor
+    #   i="杨龙"            → vod_director
+    #   j="阿丑原是街上…"   → vod_content
+    #   k="夸克原画$$$…"    → vod_play_from
+    #   l="[1.7GB]E01.mkv"  → vod_play_url
+    # m and n are the only two Strings without live evidence; they match
+    # upstream Vod's remaining names type_name and action in declaration order.
     'com/github/catvod/spider/merge/k/k': {
+        'a': 'vod_tag',
         'b': 'vod_id',
         'c': 'vod_name',
         'd': 'vod_pic',
         'e': 'vod_remarks',
+        'f': 'vod_year',
+        'g': 'vod_area',
+        'h': 'vod_actor',
+        'i': 'vod_director',
+        'j': 'vod_content',
+        'k': 'vod_play_from',
+        'l': 'vod_play_url',
+        'm': 'type_name',
+        'n': 'action',
         'o': 'style',
     },
     # Style bean, nested inside Vod as field o. Upstream Style is
