@@ -103,6 +103,11 @@ public class BaseLoader {
         return false;
     }
 
+    /** A class that lives inside a spider jar rather than the gateway itself. Null when absent. */
+    public Class<?> spiderClass(String name) {
+        return jarLoader.findClass(name);
+    }
+
     /** True if a spider class for this csp api is resolvable from the currently loaded jar pool. */
     public boolean hasSpider(String api) {
         if (api == null || api.isEmpty()) return true;

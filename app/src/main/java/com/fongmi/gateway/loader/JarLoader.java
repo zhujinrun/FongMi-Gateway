@@ -592,6 +592,24 @@ public class JarLoader {
         });
     }
 
+    /**
+     * First class with that name from any loaded spider jar, or null.
+     * GatewayServer needs this for jar-internal statics (InitOrigin, the merge pan singletons):
+     * those live only inside a per-jar URLClassLoader, so a Class.forName against the gateway's
+     * own loader misses them, and android.view.View.spiderLoader stays null until some spider
+     * hands us a UI listener. Never initialises the class -- the caller's invokestatic will.
+     */
+    public Class<?> findClass(String name) {
+        if (name == null || name.isEmpty()) return null;
+        for (URLClassLoader loader : loaders.values()) {
+            try {
+                return loader.loadClass(name);
+            } catch (ClassNotFoundException | LinkageError ignored) {
+            }
+        }
+        return null;
+    }
+
     /** True if some jar in the current pool can resolve this csp api to a loadable class. Never instantiates. */
     public boolean hasSpiderClass(String api) {
         if (api == null || !api.startsWith("csp_")) return true;

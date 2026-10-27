@@ -1152,11 +1152,19 @@ public class GatewayServer {
         return o;
     }
 
+    /**
+     * Resolve a name that may live on the spider side. Merge pan singletons and InitOrigin are
+     * only inside a jar's URLClassLoader, so Class.forName against the gateway's own loader throws
+     * even though the class is loaded two maps away; View.spiderLoader is a fallback because it is
+     * set only after a spider hands us a UI listener.
+     */
     private static Class<?> cls(String name) throws ClassNotFoundException {
         ClassLoader cl = android.view.View.spiderLoader;
         if (cl != null) {
             try { return Class.forName(name, true, cl); } catch (Throwable ignore) {}
         }
+        Class<?> fromJar = BaseLoader.get().spiderClass(name);
+        if (fromJar != null) return fromJar;
         return Class.forName(name);
     }
 
@@ -1187,15 +1195,16 @@ public class GatewayServer {
                 try {
                     java.lang.reflect.Field fl = pan.getDeclaredField(f);
                     fl.setAccessible(true);
-                    o.addProperty("pan." + f, String.valueOf(fl.get(null)));
-                } catch (Throwable t) {
-                    try {
-                        java.lang.reflect.Field fl = pan.getDeclaredField(f);
-                        fl.setAccessible(true);
-                        o.addProperty("pan." + f, String.valueOf(fl.get(panObj)));
-                    } catch (Throwable t2) {
-                        o.addProperty("pan." + f, "err:" + t2.getClass().getSimpleName());
+                    // instance fields need the live Pan captured off a spider listener; before the
+                    // first login there is none, and f.get(null) would just throw NPE
+                    boolean isStatic = java.lang.reflect.Modifier.isStatic(fl.getModifiers());
+                    if (!isStatic && panObj == null) {
+                        o.addProperty("pan." + f, "n/a");
+                        continue;
                     }
+                    o.addProperty("pan." + f, String.valueOf(fl.get(isStatic ? null : panObj)));
+                } catch (Throwable t) {
+                    o.addProperty("pan." + f, "err:" + t.getClass().getSimpleName());
                 }
             }
         } catch (Throwable t) {
@@ -1264,27 +1273,53 @@ public class GatewayServer {
         return n == 0 ? "none" : sb.toString().trim();
     }
 
-    /** spider 用 newFixedThreadPool(5)，卡住的 QR 任务会把新任务全部排队 -> 换成不限线程的缓存池 */
+    /**
+     * spider 的 InitOrigin 用 newFixedThreadPool(5)：一个卡住的二维码授权就能把 5 个线程全占住，
+     * 后来者只能排进无界队列，其它源的请求跟着一起卡。这里把核心线程数顶到 64。
+     * <p>
+     * 不替换 {@code yq} 字段：它是 final，而且换池后旧池的线程没人 shutdown，非守护线程会挡住
+     * JVM 退出。改 core 是等效的——LinkedBlockingQueue 无界，所以任务永远先开线程再入队，
+     * 只看 core，maximumPoolSize 单独调大没有任何效果。
+     * <p>
+     * 类来自 jar 池而不是应用类路径，所以 jar 还没起来时这里会失败；用 poolRetryAt 定时重试，
+     * 否则每个请求都要抛一次异常并刷一行日志。
+     */
+    private static final int POOL_CORE = 64;
+    private static final long POOL_RETRY_MS = 60_000;
     private static volatile boolean poolWidened = false;
+    private static volatile boolean poolWarned = false;
+    private static volatile long poolRetryAt = 0;
 
     private static void widenPool() {
         if (poolWidened) return;
+        if (System.currentTimeMillis() < poolRetryAt) return;
         try {
-            Class<?> c = cls("com.github.catvod.spider.InitOrigin");
-            java.lang.reflect.Field f = c.getDeclaredField("yq");
-            f.setAccessible(true);
             Object io = spiderInit();
+            if (io == null) throw new IllegalStateException("spider InitOrigin unavailable");
+            java.lang.reflect.Field f = io.getClass().getDeclaredField("yq");
+            f.setAccessible(true);
             Object pool = f.get(io);
-            if (!(pool instanceof java.util.concurrent.ThreadPoolExecutor)) return;
+            if (!(pool instanceof java.util.concurrent.ThreadPoolExecutor)) {
+                throw new IllegalStateException("unexpected pool " + pool);
+            }
             java.util.concurrent.ThreadPoolExecutor tpe = (java.util.concurrent.ThreadPoolExecutor) pool;
+            if (tpe.getCorePoolSize() >= POOL_CORE) {
+                poolWidened = true;
+                return;
+            }
             String before = "core=" + tpe.getCorePoolSize() + " active=" + tpe.getActiveCount()
                     + " size=" + tpe.getPoolSize() + " queue=" + tpe.getQueue().size();
-            if (tpe.getMaximumPoolSize() >= 64) { poolWidened = true; return; }
-            f.set(io, Executors.newCachedThreadPool());
+            tpe.setMaximumPoolSize(POOL_CORE); // setCorePoolSize rejects core > max, so grow max first
+            tpe.setCorePoolSize(POOL_CORE);
             poolWidened = true;
-            System.err.println("[ui] widenPool: " + before + " -> cached");
+            System.err.println("[ui] widenPool: " + before + " -> core=" + POOL_CORE);
         } catch (Throwable t) {
-            System.err.println("[ui] widenPool fail " + t);
+            poolRetryAt = System.currentTimeMillis() + POOL_RETRY_MS;
+            if (!poolWarned) {
+                poolWarned = true;
+                System.err.println("[ui] widenPool deferred: " + t
+                        + " (retry every " + (POOL_RETRY_MS / 1000) + "s)");
+            }
         }
     }
 
