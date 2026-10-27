@@ -97,6 +97,9 @@ public class Main {
         final File dataRoot = dataDir;
         Thread preload = new Thread(() -> {
             try {
+                // Must run before any spider's init(): several guarded spiders resolve their base
+                // host from this file and silently fall back to a long-dead domain otherwise.
+                com.fongmi.gateway.loader.SiteDomains.sync(dataRoot);
                 if (spiderUrl != null && !spiderUrl.isEmpty()) {
                     System.out.println("[gateway] preloading spider: " + spiderUrl);
                     com.github.catvod.utils.Path.setRoot(dataRoot);

@@ -54,6 +54,42 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
     放行。新增文件后务必 `git ls-files jar/prebuilt/` 确认真的入库了，否则
     构建出来的 jar 里没有它、运行时永远拉 404。
 
+站点域名配置 siteconfig.json（2026-10-27 新增）
+============================================
+    本目录里唯一的非 class 产物：一份 {站点 key: [域名...]} 映射，由
+    SiteDomains.sync() 在启动时下载，落到 <data>/files/AiWex/siteconfig。
+
+    为什么需要：加固壳里有一批 spider 不在字节码里写死站址 ——
+    AiNewWogg(玩偶) / AiNewJuTou / AiNewPianKu(盘库) / AiNewWoNiu4K(蜗牛4K) /
+    AiNewLibvio / AiQwMkv(七味) —— 它们的 init() 先调 merge.x0.e.J(key) 读这个
+    文件里的域名数组，逐个探测可用主机，探测不到才退回代码里的兜底域名。
+    安卓壳由配置中心下发这个文件；桌面网关没有这条链路，files/AiWex 一直是空的。
+
+    后果：这些源全撞在兜底域名上。玩偶的兜底是 wogg.xxooo.cf（DNS 已不存在），
+    请求全失败后 spider 返回空骨架 {"list":[],"m":0,"n":0,"q":72,...}，
+    与「上游全站停更」的形态完全一样 —— 2026-10-26 曾据此误判玩偶是上游真空。
+
+    现在的取舍：把这份文件也纳入 jar/ 分发通道。域名再变只推仓库，不用发版。
+
+    维护方法：
+      1. 候选域名从哪挖 —— 公共池 fty_spider.jar 的 Wogg.init() 里有一组
+         merge.SaZ.d("HEX") 加密串，算法 = hex 解码后按 key "ywAqAs" 循环 XOR。
+         2026-10-27 从 7 个串解出：
+             https://www.wogg.one/        200 / 5.5KB 门户页
+             https://woggpan.888484.xyz/  200 / 200KB 含 mac_total  ← 可用
+             https://wogg.xxooo.cf/       DNS 失效（就是旧兜底）
+             https://wogg.333232.xyz/     失效
+             https://wogg.888484.xyz      失效
+             http://woggpan.xxooo.cf/     失效
+             http://www.wogg.lol/         302
+      2. 判据不是「返回 200」就行：AiNewWogg 解析的是 MacCMS 网页，要能取到
+         /index.php/vodshow/<tid>--------<pg>---.html 且页面含 mac_total。
+         woggpan.888484.xyz 满足；www.wogg.one 只有门户页，只配当第二个兜底。
+      3. 只写 wogg 一个键 —— 另外 5 个源当前靠各自兜底域名活着，不碰。
+
+    容错：远程缺失 / 不是合法 {key:[url]} 映射 / 值含非法字符 → 整份丢弃并保持
+    本地现状；本地与远程一致时不重写。绝不拿半截下载或 404 页面覆盖。
+
 当前内容：
     9e82d9058843e897e3d75054604d4371949006a297e176e8c7ce668b50d2cad1
         源: http://oss4liview.moji.com/thd_file/2026/10/23/b1a69d9c535fd309388e390b0b1e0749.jpg
@@ -77,3 +113,9 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
               58/58 全标准键；AiNewLaBi search「斗罗」→ detail 683KB 五条网盘线路
         注意: 别名是权宜——新载荷那 ~3KB 差异没有跟进译码。下次换代若 API 契约变了
               会静默出空数据，此时才需要重跑 tools/wexdump（约半小时）。
+
+    siteconfig.json
+        站点域名映射（本目录唯一的非 class 产物），来历与维护见上一节。
+        当前内容: {"wogg":["https://woggpan.888484.xyz","https://www.wogg.one"]}
+        验证: 空 data 目录冷启动 → 自动落盘 → 玩偶 home 7 分类、category 出片、
+              search「斗罗」命中、detail 6 条网盘线路；预热 3.4s（含域名探测）
