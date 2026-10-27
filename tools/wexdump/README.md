@@ -122,16 +122,21 @@ d2j 为了「让输出可校验」，会把 `new X` 改成 `new Object`（配 `O
 ### 5.3 流水线
 
 ```bash
-# 1) enjarify: dex -> class
-python -m enjarify real.dex -o enj/
-# 2) 对齐 R8 构造器上提 + 重算帧
+# 1) enjarify: dex -> jar
+python -m enjarify.main real.dex -o real-enj.jar
+# 2) 对齐 R8 构造器上提 + 重算帧（直接把 jar 喂进去，不要解包）
 javac -cp asm-9.9.jar:asm-tree-9.9.jar:asm-analysis-9.9.jar -d out InitAlign.java
 java  -cp out:asm-9.9.jar:asm-tree-9.9.jar:asm-analysis-9.9.jar \
-      InitAlign enj/ aligned.jar
+      InitAlign real-enj.jar aligned.jar
 # 3) 叠上壳 jar 里的 assets（native 依赖仍在时保留）
 mkdir -p pk/assets && cp <壳 jar 里的>assets/libwex_v*.so pk/assets/
 (cd pk && jar cf ../spider.jar .)
 ```
+
+> `InitAlign` 的**第一个参数给 jar 文件**，别解成目录：R8 会把类名压到 `merge/a` 与
+> `merge/A` 只差大小写的地步（实测 1178 类里 146 组），而 Windows/NTFS 上这种目录装不下，
+> `unzip` 会逐个弹「replace?」，强行 `-o` 覆盖就是静默丢类，`classes=` 直接变 0。
+
 
 `InitAlign` 正常输出形如：
 
@@ -316,7 +321,86 @@ GET /home?site=AiNewGuanYing
 
 ---
 
-## 8. 脚本清单
+## 8. ftyguard 变种：译得出来，跑不起来（2026-10-27 实测）
+
+饭太硬配置的 `spider` 是 `xiuxiu-pro-new.meitudata.com/posters/e05f19...jpg`，
+sha256 `88e67402…`，壳叫 ftyguard（`assets/ftyguard_v{7,8}.so` + `assets/ftyshinidie.guard`
+1,328,895 B）。结构与 wexguard **完全同构**：`Init` / `DexNative` / `BaseSpiderGuard` +
+104 个空 `*Guard`，只差缓存前缀 `.ftyfnw`。
+
+### 8.1 dump 可以直接复用 wex 的 driver
+
+`Player/.probe/dump/driver.js` 改三处常量即可：`.wexfnw` → `.ftyfnw`、
+`wexguard_v8` → `ftyguard_v8`、so 副本大小过滤（81,520 / 102,440）。
+
+宿主 APK 要多一步：`nativeLibraryDir` 里原本只有 `libwexguard_v8.so`，而
+`/data/app/.../lib/arm64` 是只读挂载，**直接 cp 会 Permission denied**。做法是把
+`ftyguard_v8.so` 以 `lib/arm64-v8a/libftyguard_v8.so` 加进 APK 再重签：
+
+```bash
+adb pull $(adb shell pm path com.fm.guarddump | sed 's/package://') base.apk
+python - <<'PY'   # zipfile 追加（ZIP_STORED），保持 extractNativeLibs=true
+PY
+zipalign -p -f 4 unsigned.apk aligned.apk
+apksigner sign --ks ~/.android/debug.keystore --ks-pass pass:android \
+               --key-pass pass:android --ks-key-alias androiddebugkey --out signed.apk aligned.apk
+adb uninstall com.fm.guarddump && adb install signed.apk
+```
+
+`shell.jar`（壳 + `classes2.dex` 桥接类）同步重推，**`chmod 555` 不能忘**
+（600 会触发 `SecurityException: Writable dex file ... is not allowed`）。
+
+产物：`config.db` 1,328,895 B，内含 `classes.dex` 2,798,432 B / 1178 类。
+注意它**没有** `assets/libwex_v*.so`——fty 载荷不依赖 native 库。
+
+### 8.2 翻译顺利，校验干净，然后 0/49
+
+| 阶段 | 结果 |
+| --- | --- |
+| enjarify | 1178 类，0 错误 |
+| InitAlign | `classes=1178 analyzed=8216 failed=0 rewritten=0 rejected=0` |
+| VerifyAll | `verifyError=0`，`missing=248` 全是 Android/Gson/OkHttp 外部类 |
+| 网关装载 | `prebuilt translation fetched (md5 ok)`、`spider coverage: 45/46` |
+| **实际可用源** | **0 / 49**（45 个 home-fail）；不装 prebuilt 时是 29（23 出片 + 6 仅搜索） |
+
+`rewritten=0` 不是好事——它是"没有构造器上提可修"，说明这份载荷的破坏点不在那一层。
+
+### 8.3 根因：控制流平坦化，不是翻译缺陷
+
+`InitOrigin` 里取那个 `short[]` 的静态方法在新旧载荷之间完全不同：
+
+```text
+旧（fty_spider.jar，能跑）17 字节
+  invokestatic seed(); ifgt +9; getstatic InitOrigin.short; areturn; 死循环占位
+
+新（88e67402…）118 字节
+  istore/iload/sipush/ixor 组成状态机，两条返回路径：
+    82-84: aconst_null; astore_3; goto → 返回 null
+    94-99: getstatic InitOrigin.short; astore_3; aload_3; areturn
+```
+
+在 JVM 上恒定走 null 那条（槽位在 49↔1616 之间交替，永远命不中 204 那个分支），
+于是 `InitOrigin.init` 抛 `NullPointerException: Cannot load from short array because
+"<parameter1>" is null`，所有依赖它的 spider 构造失败。
+
+按旧版语义把该方法短路成 `getstatic; areturn` 之后（ASM 打补丁，84 条指令 → 2 条）：
+`InitOrigin.init fail` 归零、warm 失败 36 → 16，但**实际可用仍是 0/49**。说明平坦化是
+全局性的，逐个方法打补丁不可持续。
+
+**结论：这条路线当前不划算，`88e67402…` 的产物不发布。** 不装 prebuilt 时的 29 个可用
+来自公共池 `jar/fty_spider.jar`（上一代载荷的翻译产物，spider 类名稳定所以还能命中），
+装上新产物反而因为 prebuilt 短路（`Main.java:217` 成功后不回落公共池）全线变 0。
+
+### 8.4 顺带查清的两个悬案
+
+| 源 | 真实原因 |
+| --- | --- |
+| 风云 / AiDj | `NoClassDefFoundError: com/chaquo/python/PyObject` —— 内嵌 **Chaquopy Python** 脚本源，桌面 JVM 没有 Python 运行时，与翻译无关，永远救不回来 |
+| 剩余 14 个 warm 失败 | `InvocationTargetException` / `StringIndexOutOfBoundsException` / `ExceptionInInitializerError` 混杂，同样指向平坦化后的行为差异 |
+
+---
+
+## 9. 脚本清单
 
 | 文件 | 作用 |
 | --- | --- |
@@ -324,7 +408,7 @@ GET /home?site=AiNewGuanYing
 | `run_dump.py` | host 侧：spawn / attach / 落盘 `{t:'artifact'}` 二进制 |
 | `dex_pairs.py` | 从 dex 提取每个方法的 `(new-instance 类型, <init> owner)` 有序列表 |
 | `fixalign.py` | 用 dex 真值 + LCS 对齐修 d2j 产物（仅在第 5.2 节最后那条死路上需要） |
-| `InitAlign.java` | 对齐 R8 构造器上提并重算 StackMapTable（**必跑**） |
+| `InitAlign.java` | 对齐 R8 构造器上提并重算 StackMapTable（**必跑**）。第一个参数给 jar 或目录都行；Windows 上必须给 jar，否则大小写冲突会静默丢类 |
 | `VerifyAll.java` | 强制 link 全部类，统计 `VerifyError` |
 | `classfile.py` | 极简 class 文件读写：往返字节一致，可追加类级 `Signature` 属性 |
 | `bytecode.py` | 指令长度表 + 线性扫描，定位「哪个方法 `new` 了某个类」「谁 `checkcast` 成什么」 |

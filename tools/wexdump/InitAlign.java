@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 /**
@@ -163,15 +164,32 @@ public class InitAlign {
     }
 
     public static void main(String[] args) throws Exception {
-        Path dir = Paths.get(args[0]);
+        String in = args[0];
         String outJar = args[1];
 
-        List<Path> files = new ArrayList<>();
-        Files.walk(dir).filter(p -> p.toString().endsWith(".class")).forEach(files::add);
+        // 输入可以是 jar，也可以是解开的目录。jar 这条路径是必须的：R8 会把类名压到
+        // merge/a 与 merge/A 这种只差大小写的地步（实测 1178 类里有 146 组），
+        // 而 Windows/NTFS 上解包目录装不下它们 —— 解出来必然丢类，且丢得静默。
+        List<byte[]> blobs = new ArrayList<>();
+        if (in.toLowerCase(Locale.ROOT).endsWith(".jar")) {
+            try (ZipFile zf = new ZipFile(in)) {
+                for (Enumeration<? extends ZipEntry> en = zf.entries(); en.hasMoreElements(); ) {
+                    ZipEntry e = en.nextElement();
+                    if (!e.getName().endsWith(".class")) continue;
+                    try (var is = zf.getInputStream(e)) {
+                        blobs.add(is.readAllBytes());
+                    }
+                }
+            }
+        } else {
+            List<Path> files = new ArrayList<>();
+            Files.walk(Paths.get(in)).filter(p -> p.toString().endsWith(".class")).forEach(files::add);
+            for (Path p : files) blobs.add(Files.readAllBytes(p));
+        }
 
         List<ClassNode> nodes = new ArrayList<>();
-        for (Path p : files) {
-            ClassReader cr = new ClassReader(Files.readAllBytes(p));
+        for (byte[] b : blobs) {
+            ClassReader cr = new ClassReader(b);
             ClassNode cn = new ClassNode();
             cr.accept(cn, ClassReader.SKIP_FRAMES);
             nodes.add(cn);
