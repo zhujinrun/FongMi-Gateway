@@ -54,41 +54,71 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
     放行。新增文件后务必 `git ls-files jar/prebuilt/` 确认真的入库了，否则
     构建出来的 jar 里没有它、运行时永远拉 404。
 
-站点域名配置 siteconfig.json（2026-10-27 新增）
-============================================
+站点域名配置 siteconfig.json（2026-10-27 新增，同日扩到全量 16 键）
+==============================================================
     本目录里唯一的非 class 产物：一份 {站点 key: [域名...]} 映射，由
     SiteDomains.sync() 在启动时下载，落到 <data>/files/AiWex/siteconfig。
 
-    为什么需要：加固壳里有一批 spider 不在字节码里写死站址 ——
-    AiNewWogg(玩偶) / AiNewJuTou / AiNewPianKu(盘库) / AiNewWoNiu4K(蜗牛4K) /
-    AiNewLibvio / AiQwMkv(七味) —— 它们的 init() 先调 merge.x0.e.J(key) 读这个
-    文件里的域名数组，逐个探测可用主机，探测不到才退回代码里的兜底域名。
-    安卓壳由配置中心下发这个文件；桌面网关没有这条链路，files/AiWex 一直是空的。
+    为什么需要：加固壳里有一批 spider 不在字节码里写死站址，它们的 init() 先调
+    merge.x0.e.J(key) 读这个文件里的域名数组，逐个探测可用主机（6s 超时取最快），
+    探测不到才退回代码里的兜底域名。安卓壳由配置中心下发；桌面网关原先没有这条
+    链路，files/AiWex 一直是空的。
 
     后果：这些源全撞在兜底域名上。玩偶的兜底是 wogg.xxooo.cf（DNS 已不存在），
     请求全失败后 spider 返回空骨架 {"list":[],"m":0,"n":0,"q":72,...}，
     与「上游全站停更」的形态完全一样 —— 2026-10-26 曾据此误判玩偶是上游真空。
 
-    现在的取舍：把这份文件也纳入 jar/ 分发通道。域名再变只推仓库，不用发版。
+    ★ 官方下发链路（2026-10-27 挖出，以后重抓照这个走）
+      入口是字节码里硬编码的一串 OSS 地址，都在
+      com/github/catvod/spider/merge/a0/c 的 static{} 里：
 
-    维护方法：
-      1. 候选域名从哪挖 —— 公共池 fty_spider.jar 的 Wogg.init() 里有一组
-         merge.SaZ.d("HEX") 加密串，算法 = hex 解码后按 key "ywAqAs" 循环 XOR。
-         2026-10-27 从 7 个串解出：
-             https://www.wogg.one/        200 / 5.5KB 门户页
-             https://woggpan.888484.xyz/  200 / 200KB 含 mac_total  ← 可用
-             https://wogg.xxooo.cf/       DNS 失效（就是旧兜底）
-             https://wogg.333232.xyz/     失效
-             https://wogg.888484.xyz      失效
-             http://woggpan.xxooo.cf/     失效
-             http://www.wogg.lol/         302
-      2. 判据不是「返回 200」就行：AiNewWogg 解析的是 MacCMS 网页，要能取到
-         /index.php/vodshow/<tid>--------<pg>---.html 且页面含 mac_total。
-         woggpan.888484.xyz 满足；www.wogg.one 只有门户页，只配当第二个兜底。
-      3. 只写 wogg 一个键 —— 另外 5 个源当前靠各自兜底域名活着，不碰。
+          http://upload.baicanuc.cn/ossfiles/1768320816/item.txt
+          http://ossduo.baicanuc.cn/ossfiles/1768320816/item.txt
+          http://ossone.baicanuc.cn/ossfiles/1768320816/item.txt
+          （同级还有 api.txt / aigo.txt / baidu.txt / guangya.txt）
+
+      item.txt 是一个装饰用的 JSON（vod_Name/notice/gg 等），其中 config_site
+      字段指向真正的映射文件，伪装成 .jpg：
+
+          config_site: http://oss4liview.moji.com/thd_file/<日期>/<hash>.jpg
+
+      那个 jpg 就是 1232 字节的纯 JSON，16 个键，正是安卓壳下发的原件。
+
+      一条命令重抓（换新日期只需重跑，item.txt 的路径是固定的）：
+          curl -s http://ossduo.baicanuc.cn/ossfiles/1768320816/item.txt \
+            | python -c "import json,sys;print(json.load(sys.stdin)['config_site'])" \
+            | xargs curl -s | python -m json.tool > jar/prebuilt/siteconfig.json
+
+      注意 api.txt 那个 44 字节 base64（解出来正好 32 字节）是 AES-256 密钥，
+      与 siteconfig 无关，不要拿它去解这份 JSON。
+
+    ★ 判据不是「返回 200」就行
+      这些 spider 解析的是 MacCMS 网页，要能取到 /index.php/vodshow/... 且页面
+      含 mac_total。2026-10-27 实测有两类假活：
+        - guanying 的 6 个域名，5 个返回 1076 B 的「浏览器安全验证」PoW 挑战页
+          （static.1234cdn.com 的 powSolve），无 JS 环境永远过不去；
+        - dj92.com 之类是域名停放页（Cowboy server，470 B）。
+      反过来，「域名死」也不等于站点死：大站点普遍有多个镜像，探测会自动选活的。
+
+    ★ 覆盖的 16 个键（对应 99 站里 15 个，erxiao/zhizhen 不在该配置内）
+      wogg=玩偶  huajuan=花卷  muou=木偶  guanying=观影  duoduo=多多
+      huban=胡巴  leijing 123pan shayang jutou=桔子  qiwei=七味
+      libvio panku=盘库  kuaiying=快影  labi=蜡笔  shandian=闪电
+      另有 woniu4k(蜗牛) 与 pianku(盘库别名) 是两个类私有的键，官方表里没有，
+      它们靠兜底域名 wn4k.com 活着，所以不写。
+
+    ★ 已知写进去也救不回来的（2026-10-27 实测，不必再试）
+      guanying  5/6 域名是 PoW 挑战页，只有分类骨架、列表恒空
+      huban     官方表里唯一 IP 43.248.128.118 已死，兜底 103.217.192.130 返回 404
+      WexAiJianPian(賤賤)  不走 siteconfig：查 swrdsfeiujo25sw.cc 的 DNS TXT 拿
+                域名列表（cqxkn.com,hzlfm.com,whhyn.com,cqlzn.com,zxfmj.com），
+                这 5 个域名在 Cloudflare 上都没有 A 记录，下发链路本身已空
+      MusicAiLunHui(轮回音乐)  https://www.dj92.cc 写死在字节码，DNS 失效；
+                dj92.com 是停放页，其余后缀无记录
 
     容错：远程缺失 / 不是合法 {key:[url]} 映射 / 值含非法字符 → 整份丢弃并保持
     本地现状；本地与远程一致时不重写。绝不拿半截下载或 404 页面覆盖。
+    某个键的域名全死时不影响启动：探测失败 → 抛异常 → 回落到该类的兜底域名。
 
 当前内容：
     9e82d9058843e897e3d75054604d4371949006a297e176e8c7ce668b50d2cad1
@@ -116,6 +146,15 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
 
     siteconfig.json
         站点域名映射（本目录唯一的非 class 产物），来历与维护见上一节。
-        当前内容: {"wogg":["https://woggpan.888484.xyz","https://www.wogg.one"]}
-        验证: 空 data 目录冷启动 → 自动落盘 → 玩偶 home 7 分类、category 出片、
-              search「斗罗」命中、detail 6 条网盘线路；预热 3.4s（含域名探测）
+        当前内容: 安卓壳官方下发的原件，16 键 39 条域名（2026-10-27 抓取，
+                  来源 http://oss4liview.moji.com/thd_file/2026/10/20/
+                       89f63e6bf75d3c5da2bb2e94022c5a98.jpg）
+        实测: 38 条域名里 34 条活；huban 唯一 IP 已死，guanying 5 条是 PoW 页
+        验证: 空 data 目录冷启动 → [siteconfig] 16 键全量落盘 → 99 站回归
+              可用 47 → 50（新增 玩偶 / AiNewDuoDuo / SoAiHaiYin，无一片掉落）：
+                玩偶         home 7 分类，category 70 条「末世行者」
+                AiNewDuoDuo  home 6 分类，category 72 条「空枪」  ← 修前是空骨架
+                花卷/木偶/盘库/桔子/七味/快影/闪电/蜡笔/蜗牛 全部照常出片
+        注意: AiNewDuoDuo 的兜底 tv.yydsys.top 与玩偶同款死法（DNS 无记录），
+              但它拿到官方表后立刻恢复 —— 证明「空骨架 + q 恒定」不能直接判定
+              上游停更，先查 siteconfig 有没有这个键。
