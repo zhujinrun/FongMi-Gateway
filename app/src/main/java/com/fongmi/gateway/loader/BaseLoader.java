@@ -1,6 +1,7 @@
 package com.fongmi.gateway.loader;
 
 import com.fongmi.gateway.config.Site;
+import com.fongmi.gateway.spider.drpy.DrpySpider;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderNull;
 import com.github.catvod.utils.Crypto;
@@ -14,6 +15,8 @@ public class BaseLoader {
     private static final BaseLoader INSTANCE = new BaseLoader();
 
     private final JarLoader jarLoader = new JarLoader();
+    private final ConcurrentHashMap<String, Spider> drpySpiders = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> drpyErrors = new ConcurrentHashMap<>();
 
     public static BaseLoader get() {
         return INSTANCE;
@@ -21,13 +24,15 @@ public class BaseLoader {
 
     public void clear() {
         jarLoader.clear();
+        drpySpiders.values().forEach(Spider::destroy);
+        drpySpiders.clear();
+        drpyErrors.clear();
     }
 
     public Spider getSpider(String key, String api, String ext, String jar) {
         if (api == null || api.isEmpty()) return new SpiderNull();
         if (isJs(api)) {
-            // JS spiders not implemented in MVP
-            return new SpiderNull();
+            return jsSpider(key, ext);
         }
         if (isPy(api)) {
             return new SpiderNull();
@@ -36,6 +41,32 @@ public class BaseLoader {
             return jarLoader.getSpider(key, api, ext, jar);
         }
         return new SpiderNull();
+    }
+
+    /**
+     * drpy source: {@code api} is the framework bundle, {@code ext} the site's own rule file.
+     * Only the rule is read; the framework is not needed, see {@link DrpySpider}.
+     */
+    private Spider jsSpider(String key, String ext) {
+        String spKey = key + "|" + ext;
+        Spider cached = drpySpiders.get(spKey);
+        if (cached != null) return cached;
+        try {
+            DrpySpider spider = new DrpySpider();
+            spider.siteKey = key;
+            spider.init(android.app.Application.get(), ext);
+            drpySpiders.put(spKey, spider);
+            drpyErrors.remove(key);
+            return spider;
+        } catch (Throwable e) {
+            // never cache the failure: a rule file that timed out once should retry on the next
+            // request instead of turning the source into a permanent SpiderNull
+            System.err.println("[drpy] spider fail key=" + key + " ext=" + ext + " -> " + e);
+            drpyErrors.put(key, e.getClass().getSimpleName() + ": " + e.getMessage());
+            SpiderNull nullSpider = new SpiderNull();
+            nullSpider.siteKey = key;
+            return nullSpider;
+        }
     }
 
     public Spider getSpider(Site site) {
@@ -59,7 +90,8 @@ public class BaseLoader {
 
     public String getError(String key, String jar) {
         // site key first; jar md5 only for parse/load failures, not single-class failures
-        String e = jarLoader.getError(key);
+        String e = drpyErrors.getOrDefault(key, "");
+        if (e.isEmpty()) e = jarLoader.getError(key);
         if (e == null || e.isEmpty()) {
             String jaKey = Crypto.md5(String.valueOf(jar));
             e = jarLoader.getError(jaKey);

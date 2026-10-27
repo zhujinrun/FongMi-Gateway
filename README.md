@@ -49,6 +49,25 @@ https://gh-proxy.org/https://github.com/zhujinrun/FongMi-Gateway/raw/refs/heads/
 
 github / gh-proxy 链接自动多镜像回退：按「原始链接 → gh-proxy.org → ghfast.top → ghproxy.net → gh-proxy.com → mirror.ghproxy.com → gitdl.cn → github.moeyy.xyz → github 直连」顺序逐个尝试，md5 文件同样走镜像；命中非首个镜像时日志输出 `[jar] loaded via mirror:`。
 
+### drpy（`.js`）源
+
+站点 `api` 是 drpy 框架（如 `drpy2.min.js`），`ext` 是站点自己的规则文件时，走 `com.fongmi.gateway.spider.drpy`：
+
+- **不执行 drpy2.min.js**。那份框架靠 `import "assets://js/lib/cheerio.min.js"` 拉一整套模块，桌面端没有这套 assets，也不需要：这些规则文件都只是 `var rule = {...}`，字段是数据而非代码。网关用 Rhino 把对象字面量求值成 JSON 读一次，其余全部用 Java 解释。
+- **只对 `js:` 片段用 Rhino**（`lazy`、`一级`、`推荐`、`搜索` 里的钩子），宿主函数手写在 `DrpyJs`：`request`/`fetch`/`post`、`setResult`、`jsp.pdfh|pd|pdfa`、`md5`、`base64Encode/Decode`、`joinUrl`、`*_UA` 常量、`fetch_params`。
+- 选 Rhino 而非 QuickJS/GraalJS：纯 Java，fat jar 在 win/mac/linux 都是单文件（QuickJS 要按平台带 `.dll/.dylib/.so`，GraalJS 要多 ~50MB）。代价是 jar +1.7MB。
+
+已实现（按 drpy2.min.js 的语义逐条对齐）：`class_name`/`class_url`、`filter`/`filter_url`/`filter_def` 与 `{{fl.x}}` 渲染、`一级`/`搜索` 的三种取值（选择器 / `json:` / `js:`）、`double` 双层列表、`二级` 的 `"*"`（合成 `嗅探播放$url`，id 带 `@@name@@pic`）、`js:` 与对象式 `二级`、`play_parse` + `lazy`。
+
+未实现（现有规则都没用到，降级为「无数据」而不是报错）：`class_parse`、gzip 字符串形式的 `filter`、`play_json` 正则表、xpath 选择器。
+
+两处**刻意的偏离**：
+
+1. `js:` 钩子返回的列表也补 `@@name@@pic` 后缀 —— drpy 参考实现只在一级选择器路径补，导致钩子源（虎牙/斗鱼）详情页没有标题。详情解析会先切掉后缀，所以不影响 id。
+2. `play` 结果若是 `.m3u8/.mp4/.flv` 等直链则强制 `parse:0`。drpy 在规则没有 `play_json` 时一律写 `parse:1`，直链再走嗅探会被打断。
+
+实测（饭太硬 49 源，同一配置、同一轮预热）：可用 29 → 31，三个 `.js` 站（虎牙/斗鱼/兔小贝）从 `home-fail` 变为分类出片；兔小贝的 `lazy` 能直接解出 mp4 直链，虎牙/斗鱼是直播页，交给 Player 嗅探。
+
 ### 场景 1：只起网关，稍后在 Player 里同步配置
 
 ```powershell

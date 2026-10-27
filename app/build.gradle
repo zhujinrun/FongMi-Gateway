@@ -18,6 +18,10 @@ dependencies {
     implementation 'com.vaadin.external.google:android-json:0.0.20131108.vaadin1'
     implementation 'org.xerial:sqlite-jdbc:3.49.1.0'
     implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+    // drpy JS sources: rule files are plain object literals, and the `js:` hooks are ES5-ish.
+    // Rhino is pure Java, so the fat jar stays single-file on win/mac/linux -- QuickJS would
+    // need a .dll/.dylib/.so per platform and GraalJS would add ~50MB.
+    implementation 'org.mozilla:rhino:1.9.1'
     implementation 'com.github.pxb1988:dex2jar:v2.4'
     runtimeOnly 'com.github.pxb1988.dex2jar:dex-tools:v2.4'
 }
