@@ -154,14 +154,11 @@ public final class DrpyJs {
         ScriptableObject.putProperty(scope, "RULE_CK", "cookie");
         ScriptableObject.putProperty(scope, "VODS", cx.newArray(scope, 0));
 
-        Scriptable fetchParams = cx.newObject(scope);
-        Scriptable headers = cx.newObject(scope);
-        for (Map.Entry<String, String> e : rule.headers().entrySet()) {
-            ScriptableObject.putProperty(headers, e.getKey(), e.getValue());
-        }
-        ScriptableObject.putProperty(fetchParams, "headers", headers);
-        ScriptableObject.putProperty(fetchParams, "timeout", rule.integer("timeout", DEFAULT_TIMEOUT_MS));
-        ScriptableObject.putProperty(scope, "fetch_params", fetchParams);
+        // drpy keeps two of these: `rule_fetch_params` is what the framework rebuilds from the rule
+        // header set, `fetch_params` is a working copy the framework reassigns before each call.
+        // Snippets use both -- 斗鱼's 搜索 hook copies `rule_fetch_params` -- so both must exist.
+        ScriptableObject.putProperty(scope, "rule_fetch_params", fetchParams(cx, scope));
+        ScriptableObject.putProperty(scope, "fetch_params", fetchParams(cx, scope));
 
         // setResult writes into vodsSink instead of only into the JS VODS array: the array is
         // still updated for snippets that read it, but the host never depends on that round trip
@@ -173,7 +170,17 @@ public final class DrpyJs {
             JsonObject opts = opts(c, s, args, 1);
             return fetch(text(args, 0), method(opts), body(opts), headers(opts));
         });
-        fn(scope, "post", 3, (c, s, args) -> fetch(text(args, 0), "POST", text(args, 1), headers(opts(c, s, args, 2))));
+        // drpy's post(url, obj) is request(url, obj) with the method forced to POST, so the second
+        // argument is an options object carrying `body`, not the body itself. A primitive is still
+        // accepted as a body, which is what a hand-written snippet occasionally passes.
+        fn(scope, "post", 2, (c, s, args) -> {
+            Object second = args.length > 1 ? args[1] : null;
+            if (second != null && !(second instanceof Scriptable)) {
+                return fetch(text(args, 0), "POST", text(args, 1), headers(opts(c, s, args, 2)));
+            }
+            JsonObject opts = opts(c, s, args, 1);
+            return fetch(text(args, 0), "POST", body(opts), headers(opts));
+        });
 
         // jsp / jq both resolve to the DOM parser; drpy only distinguishes them for xpath support,
         // which none of the shipped rules use.
@@ -213,6 +220,18 @@ public final class DrpyJs {
         ScriptableObject.putProperty(console, "error", log);
         ScriptableObject.putProperty(console, "warn", log);
         ScriptableObject.putProperty(scope, "console", console);
+    }
+
+    /** {@code {headers, timeout}}: the shape drpy hands to request() when a snippet passes none. */
+    private Scriptable fetchParams(Context cx, Scriptable scope) {
+        Scriptable params = cx.newObject(scope);
+        Scriptable headers = cx.newObject(scope);
+        for (Map.Entry<String, String> e : rule.headers().entrySet()) {
+            ScriptableObject.putProperty(headers, e.getKey(), e.getValue());
+        }
+        ScriptableObject.putProperty(params, "headers", headers);
+        ScriptableObject.putProperty(params, "timeout", rule.integer("timeout", DEFAULT_TIMEOUT_MS));
+        return params;
     }
 
     /** drpy's setResult: {url,title,desc,pic_url|img,...} -> TVBox {vod_*} rows. */

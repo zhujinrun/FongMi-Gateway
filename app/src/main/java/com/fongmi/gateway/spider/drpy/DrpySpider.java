@@ -329,6 +329,11 @@ public class DrpySpider extends Spider {
             String inside = url.substring(url.indexOf('[') + 1, url.indexOf(']'));
             url = page == 1 ? inside : url.substring(0, url.indexOf('['));
         }
+        if (url.contains("fypage")) url = url.replace("fypage", String.valueOf(page));
+        // the snippet sees the untrimmed form, `;post` and `#params` included: 斗鱼's 搜索 hook
+        // splits exactly those two markers to build its own POST, so it must not receive the
+        // URL we already decoded on its behalf
+        String hookInput = r.absolute(url);
         String method = "GET";
         String body = null;
         if (url.contains(";")) {
@@ -342,10 +347,9 @@ public class DrpySpider extends Spider {
             url = halves[0];
             body = halves[1];
         }
-        if (url.contains("fypage")) url = url.replace("fypage", String.valueOf(page));
         String abs = r.absolute(url);
 
-        JsonArray list = parseList(p, abs, "", false, method, body);
+        JsonArray list = parseList(p, abs, "", false, method, body, hookInput);
         return wrap(list, page).toString();
     }
 
@@ -452,6 +456,15 @@ public class DrpySpider extends Spider {
 
     private JsonArray parseList(String expr, String pageUrl, String tid, boolean doubleMode,
                                 String method, String postBody) {
+        return parseList(expr, pageUrl, tid, doubleMode, method, postBody, pageUrl);
+    }
+
+    /**
+     * @param hookInput what a {@code js:} snippet sees as {@code input}; drpy hands over the URL
+     *                  before it is split into request target and form body
+     */
+    private JsonArray parseList(String expr, String pageUrl, String tid, boolean doubleMode,
+                                String method, String postBody, String hookInput) {
         JsonArray out = new JsonArray();
         String p = expr == null ? "" : expr.trim();
         if (p.isEmpty()) return out;
@@ -460,7 +473,7 @@ public class DrpySpider extends Spider {
             boolean sniff = "*".equals(rule.pick("二级").trim());
             try {
                 DrpyJs.Outcome o = js.run(p.substring(3).trim(),
-                        vars("input", pageUrl, "MY_URL", pageUrl, "HOST", rule.host()));
+                        vars("input", hookInput, "MY_URL", hookInput, "HOST", rule.host()));
                 JsonElement vods = o.vodsJson == null ? null : JsonParser.parseString(o.vodsJson);
                 if (vods != null && vods.isJsonArray()) {
                     for (JsonElement e : vods.getAsJsonArray()) {

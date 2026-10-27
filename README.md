@@ -54,7 +54,8 @@ github / gh-proxy 链接自动多镜像回退：按「原始链接 → gh-proxy.
 站点 `api` 是 drpy 框架（如 `drpy2.min.js`），`ext` 是站点自己的规则文件时，走 `com.fongmi.gateway.spider.drpy`：
 
 - **不执行 drpy2.min.js**。那份框架靠 `import "assets://js/lib/cheerio.min.js"` 拉一整套模块，桌面端没有这套 assets，也不需要：这些规则文件都只是 `var rule = {...}`，字段是数据而非代码。网关用 Rhino 把对象字面量求值成 JSON 读一次，其余全部用 Java 解释。
-- **只对 `js:` 片段用 Rhino**（`lazy`、`一级`、`推荐`、`搜索` 里的钩子），宿主函数手写在 `DrpyJs`：`request`/`fetch`/`post`、`setResult`、`jsp.pdfh|pd|pdfa`、`md5`、`base64Encode/Decode`、`joinUrl`、`*_UA` 常量、`fetch_params`。
+- **只对 `js:` 片段用 Rhino**（`lazy`、`一级`、`推荐`、`搜索` 里的钩子），宿主函数手写在 `DrpyJs`：`request`/`fetch`/`post`、`setResult`、`jsp.pdfh|pd|pdfa`、`md5`、`base64Encode/Decode`、`joinUrl`、`*_UA` 常量、`fetch_params` 与 `rule_fetch_params`。
+- 两个容易踩的语义点，都按框架原样实现：`post(url, obj)` 的第二个参数是**选项对象**（body 在 `obj.body` 里），不是请求体本身；`搜索` 的 `js:` 钩子拿到的 `input` 是**未拆开**的地址，`;post` 和 `#参数` 都还在（斗鱼的钩子正是靠自己 split 这两段来拼 POST）。
 - 选 Rhino 而非 QuickJS/GraalJS：纯 Java，fat jar 在 win/mac/linux 都是单文件（QuickJS 要按平台带 `.dll/.dylib/.so`，GraalJS 要多 ~50MB）。代价是 jar +1.7MB。
 
 已实现（按 drpy2.min.js 的语义逐条对齐）：`class_name`/`class_url`、`filter`/`filter_url`/`filter_def` 与 `{{fl.x}}` 渲染、`一级`/`搜索` 的三种取值（选择器 / `json:` / `js:`）、`double` 双层列表、`二级` 的 `"*"`（合成 `嗅探播放$url`，id 带 `@@name@@pic`）、`js:` 与对象式 `二级`、`play_parse` + `lazy`。
@@ -66,7 +67,7 @@ github / gh-proxy 链接自动多镜像回退：按「原始链接 → gh-proxy.
 1. `js:` 钩子返回的列表也补 `@@name@@pic` 后缀 —— drpy 参考实现只在一级选择器路径补，导致钩子源（虎牙/斗鱼）详情页没有标题。详情解析会先切掉后缀，所以不影响 id。
 2. `play` 结果若是 `.m3u8/.mp4/.flv` 等直链则强制 `parse:0`。drpy 在规则没有 `play_json` 时一律写 `parse:1`，直链再走嗅探会被打断。
 
-实测（饭太硬 49 源，同一配置、同一轮预热）：可用 29 → 31，三个 `.js` 站（虎牙/斗鱼/兔小贝）从 `home-fail` 变为分类出片；兔小贝的 `lazy` 能直接解出 mp4 直链，虎牙/斗鱼是直播页，交给 Player 嗅探。
+实测（饭太硬 49 源，同一配置、同一轮预热、均按 4 并发）：可用 29 → 32，三个 `.js` 站（虎牙 4 分类/120 条、斗鱼 9 分类/8 条、兔小贝 4 分类/30 条）从 `home-fail` 变为分类出片，零掉落。兔小贝的 `lazy` 能直接解出 mp4 直链，虎牙/斗鱼是直播页，交给 Player 嗅探。王二小 99 源（全为 csp guard 源，不含 `.js`）保持 50 可用，唯一差异项 MusicAiKuWo 在两个 jar 上直连重测结果一致，属探测抖动。
 
 ### 场景 1：只起网关，稍后在 Player 里同步配置
 
