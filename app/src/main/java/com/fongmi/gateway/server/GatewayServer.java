@@ -903,7 +903,7 @@ public class GatewayServer {
             for (Site site : VodConfig.get().getSites()) {
                 String api = site.getApi();
                 if (api == null || !api.startsWith("csp_")) continue;
-                if (BaseLoader.get().hasSpider(api)) ok++;
+                if (BaseLoader.get().hasSpider(api, site.getJar())) ok++;
                 else missing++;
             }
         } catch (Throwable ignored) {
@@ -976,8 +976,9 @@ public class GatewayServer {
             m.put("hide", site.getHide());
             m.put("indexs", site.getIndexs());
             m.put("timeout", site.getTimeout());
-            // 本机能否真的跑起来（安卓专属爬虫 / 池里缺类 都为 false），前端据此禁用并标「不支持」
-            m.put("supported", BaseLoader.get().hasSpider(site.getApi()));
+            // 本机能否真的跑起来（安卓专属爬虫 / 池里缺类 都为 false），前端据此禁用并标「不支持」。
+            // 传 site.getJar()，与真正取 spider 时用的 jar 完全相同，否则两边结论会打架。
+            m.put("supported", BaseLoader.get().hasSpider(site.getApi(), site.getJar()));
             list.add(m);
         }
         return list;

@@ -610,15 +610,31 @@ public class JarLoader {
         return null;
     }
 
-    /** True if some jar in the current pool can resolve this csp api to a loadable class. Never instantiates. */
-    public boolean hasSpiderClass(String api) {
+    /**
+     * Dry-run of {@link #getSpider}'s class lookup: same jar list, same Guard-suffix fallback, but
+     * never instantiates. Never say "supported" unless getSpider would actually find the class.
+     *
+     * <p>This used to scan every loader in the pool instead of the jars named by this site, which
+     * answered true for any class that happened to sit in some *other* site's jar. getSpider only
+     * looks at this site's own jar, so the request then died with
+     * {@code ClassNotFoundException: spider class not found in any jar of pool} while /sites had
+     * already told the client the site was fine. Fetch on demand first so a jar that has not been
+     * parsed yet (getSpider would parse it) is not reported as missing.
+     */
+    public boolean hasSpiderClass(String api, String jar) {
         if (api == null || !api.startsWith("csp_")) return true;
         String simple = api.substring("csp_".length());
-        for (URLClassLoader loader : loaders.values()) {
+        String list = String.valueOf(jar);
+        parseJar(Crypto.md5(list), jar);
+        for (String raw : list.split("\\|")) {
+            String part = raw.trim();
+            if (part.isEmpty()) continue;
+            URLClassLoader loader = loaders.get(Crypto.md5(part));
+            if (loader == null) continue;
             try {
                 loadSpiderClass(loader, simple);
                 return true;
-            } catch (ClassNotFoundException ignored) {
+            } catch (ClassNotFoundException | LinkageError ignored) {
             }
         }
         return false;

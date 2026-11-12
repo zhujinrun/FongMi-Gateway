@@ -253,7 +253,7 @@ public class Main {
                 String api = site.getApi();
                 if (api == null || !api.startsWith("csp_")) continue;
                 csp++;
-                if (!com.fongmi.gateway.loader.BaseLoader.get().hasSpider(api)) missing.add(site.getKey() + "(" + api + ")");
+                if (!com.fongmi.gateway.loader.BaseLoader.get().hasSpider(api, site.getJar())) missing.add(site.getKey() + "(" + api + ")");
             }
             if (missing.isEmpty()) {
                 System.out.println("[gateway] spider coverage: " + csp + "/" + csp + " csp sites resolvable");

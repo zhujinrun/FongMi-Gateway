@@ -108,11 +108,15 @@ public class BaseLoader {
         return jarLoader.findClass(name);
     }
 
-    /** True if a spider class for this csp api is resolvable from the currently loaded jar pool. */
-    public boolean hasSpider(String api) {
+    /**
+     * True if a spider class for this csp api is resolvable from the jar(s) this site would use.
+     * Must stay in sync with {@link #getSpider(Site)} — a site reported as supported here and then
+     * failing there is what made the client offer sources that could never load.
+     */
+    public boolean hasSpider(String api, String jar) {
         if (api == null || api.isEmpty()) return true;
         if (!isCsp(api)) return true;
-        return jarLoader.hasSpiderClass(api);
+        return jarLoader.hasSpiderClass(api, jar);
     }
 
     public String recent() {
