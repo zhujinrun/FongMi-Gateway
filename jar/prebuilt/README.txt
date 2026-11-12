@@ -22,9 +22,22 @@ jar/prebuilt/ —— 加固壳 spider 的预翻译产物
     算出源 jar 的 sha256，按 <repo>/prebuilt/<sha256>.jvm.jar 去取（走 gh-proxy
     镜像链，与公共池同一通道），成功就落成缓存里的 <源 jar 名>.jvm.jar 直接加载，
     跳过 dex2jar；每台机器只会下载一次。
-    取不到（指纹未收录 / 上游已换版本）→ 照旧走 d2j → 该源被判为
-    「requires Android native/Dex」并提示不支持，不会静默出「无数据」。
-    所以这里缺文件是安全降级，不是错误。
+    取不到（指纹未收录 / 上游已换版本）→ 再试一次 latest.jvm.jar（见下）→
+    仍不行才照旧走 d2j → 该源被判为「requires Android native/Dex」并提示不支持，
+    不会静默出「无数据」。所以这里缺文件是安全降级，不是错误。
+
+latest.jvm.jar —— 载荷重建后的兜底（2026-11-12 新增）
+    上游每隔一两周就会重打包一次载荷：同一套产品、新的 zip、新的 sha256，但
+    *Guard 类名基本不变（本次实测 107 个里仍覆盖 102 个）。而产出精确的翻译
+    需要 ARM 设备让壳自己解密，等一次 dump 的成本很高，中间这段时间整个配置
+    的源会全黑。
+    所以 Prebuilt.install 在精确指纹缺失时，会再取一次 prebuilt/latest.jvm.jar：
+        - 同样强制校验 .md5、同样要求是含 .class 的 zip
+        - 装上后照常走类解析，缺哪个类哪个源就不支持，不会假装可用
+        - 日志记 [jar] using latest known translation for rebuilt payload <sha>
+        - -Dgateway.prebuilt.fallback=false 可整体关掉
+    维护方式：拿到新的精确翻译后，把它同时复制成 latest.jvm.jar 并更新 .md5。
+    latest 只该保存**最新且覆盖面最广**的那一份，不要放试验性产物。
 
 完整性校验（强制，2026-10-26）：
     每个产物旁必须挂 <sha256>.jvm.jar.md5（32 位小写 hex + CRLF，与

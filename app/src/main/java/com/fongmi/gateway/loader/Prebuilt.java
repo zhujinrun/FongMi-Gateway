@@ -48,6 +48,9 @@ final class Prebuilt {
     /** 本次进程内已确认不存在的指纹，避免同一启动里反复等超时。 */
     private static final Set<String> MISSING = ConcurrentHashMap.newKeySet();
 
+    /** Newest translation we have, used when the payload was rebuilt upstream (see {@link #install}). */
+    private static final String LATEST = "latest";
+
     /** True if a translation matching {@code src} was fetched, verified and written to {@code out}. */
     static boolean install(File src, File out) {
         // Only guarded shells are worth a lookup. Public pools (wex_spider.jar) are dex-only
@@ -55,17 +58,34 @@ final class Prebuilt {
         if (!looksGuarded(src)) return false;
         String key = sha256(src);
         if (key.isEmpty() || MISSING.contains(key)) return false;
-        String url = base() + "prebuilt/" + key + ".jvm.jar";
+        String dir = base() + "prebuilt/";
+
+        if (tryInstall(dir + key + ".jvm.jar", out, key)) return true;
+
+        // Upstream rebuilds the payload every couple of weeks: same product, new zip, new sha256,
+        // and usually the same Guard class names (105 of 107 last time). Producing an exact
+        // translation needs an ARM device to let the shell decrypt itself, so without this
+        // fallback one rebuild turns every source in the config dark until someone runs the dump.
+        // Best effort: install the newest translation, and let normal class resolution decide
+        // which sites actually work — classes that no longer exist simply stay unsupported.
+        if (fallback() && tryInstall(dir + LATEST + ".jvm.jar", out, key)) {
+            System.err.println("[jar] using latest known translation for rebuilt payload "
+                    + shortKey(key) + " (best effort)");
+            return true;
+        }
+
+        MISSING.add(key);
+        System.err.println("[jar] no prebuilt translation for payload " + shortKey(key)
+                + " (will report as Android-native only)");
+        return false;
+    }
+
+    /** Download+verify one translation URL. False on any failure; never touches {@link #MISSING}. */
+    private static boolean tryInstall(String url, File out, String key) {
         // Integrity gate: the sibling .md5 is mandatory. A missing/invalid checksum means the
         // channel is incomplete or has been stripped — neither is safe to install from.
         String expect = fetchChecksum(url + ".md5");
-        if (expect.isEmpty()) {
-            MISSING.add(key);
-            System.err.println("[jar] prebuilt md5 missing or invalid for " + shortKey(key)
-                    + ", refuse to install (will report as Android-native only)");
-            return false;
-        }
-        Exception last = null;
+        if (expect.isEmpty()) return false;
         for (String cand : JarLoader.expand(url)) {
             try (var res = com.github.catvod.net.OkHttp.newCall(cand).execute()) {
                 if (res.code() != 200 || res.body() == null) continue;
@@ -74,7 +94,6 @@ final class Prebuilt {
                 if (!expect.equalsIgnoreCase(actual)) {
                     System.err.println("[jar] prebuilt md5 mismatch: " + cand
                             + " expect=" + expect + " actual=" + actual + ", rejected");
-                    last = new Exception("md5 mismatch: " + cand);
                     continue;
                 }
                 if (!looksLikeClassesJar(data)) {
@@ -87,13 +106,15 @@ final class Prebuilt {
                 System.err.println("[jar] prebuilt translation fetched: " + key + " (" + data.length + " B, md5 ok)");
                 return true;
             } catch (Exception e) {
-                last = e;
+                System.err.println("[jar] prebuilt fetch failed: " + cand + " -> " + e);
             }
         }
-        MISSING.add(key);
-        System.err.println("[jar] no prebuilt translation for payload " + shortKey(key)
-                + " (will report as Android-native only)" + (last == null ? "" : " last=" + last));
         return false;
+    }
+
+    /** Kill switch for the rebuilt-payload fallback: {@code -Dgateway.prebuilt.fallback=false}. */
+    private static boolean fallback() {
+        return !"false".equalsIgnoreCase(System.getProperty("gateway.prebuilt.fallback", "true"));
     }
 
     /** Fetch a sibling {@code .md5} checksum; returns the 32-hex digest or empty if unusable. */
