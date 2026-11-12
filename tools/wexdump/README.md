@@ -49,6 +49,25 @@ assets/wexshinidie.guard         943142 B  流加密载荷
 - `frida-server` 必须与客户端**同版本**（frida 17 移除了内置 Java bridge，用 16.7.19）
 - `adb root` 可用
 
+本机实测（2026-11-12）：
+
+```text
+ANDROID_HOME = E:\app\Android\android-sdk
+adb          35.0.2        (platform-tools)
+emulator     35.2.10.0
+frida       16.7.19        (CLI 与 python 模块同版本)
+AVD          GuardDump34   (android-34 / x86_64 / google_apis)
+宿主 APK     com.fm.guarddump
+```
+
+**不要被「环境没了」的旧记录误导**：整套东西都在，唯一要现下的是 `frida-server`
+（`frida-server-16.7.19-android-x86_64.xz`，解压后 114MB；GitHub 直连常被掐，
+走 `https://gh-proxy.com/https://github.com/...` 一次拿全，**别用 `curl -C -` 续传**
+——直连与镜像的 Content-Length 不一致，续出来的包 `xz -t` 直接报 Unexpected end）。
+
+模拟器必须用**托管后台**方式启动，不能 `&`：会话结束时 `&` 起的 qemu 会被一起回收，
+表现为 `adb devices` 空、日志停在 Vulkan 初始化。
+
 踩过的坑，按出现顺序：
 
 | 现象 | 原因 / 解法 |
@@ -191,8 +210,8 @@ python gsonparams.py <aligned.jar> <out.jar>        # 幂等，跑两次结果�
 java SigProbe.java <out.jar> com.github.catvod.spider.merge.k.f   # 反射层自检
 ```
 
-签名表 `SIGNATURES` 里每一条都带证据注释。**载荷换代后必须重跑**：类名是 R8 分配的，
-新载荷里 `merge/k/f` 完全可能是别的东西，映射不通用。
+签名表 `GENERATIONS[...]['signatures']` 里每一条都带证据注释。**载荷换代后必须加一代**：
+类名是 R8 分配的，新载荷里 `merge/k/f` 完全可能是别的东西，映射不通用 —— 做法见 5.7。
 
 ### 5.6 重建 Gson 的 `@SerializedName`
 
@@ -245,6 +264,52 @@ java -cp "<gateway.jar>;." FieldProbe <out.jar> com.github.catvod.spider.merge.z
 
 `AnnoDump` 查注解是否真被 JVM 认可（坑 1 只有它能暴露），`FieldProbe` 用载荷自带的 Gson
 真的序列化一次（坑 2 只有它能暴露）。两个都得跑，只做字节检查会两次都是"看起来成功"。
+
+---
+
+## 5.7 换代时怎么重跑这两张表
+
+两张表都是**一代一份**：R8 每次重新分配内部类名，旧表的键在新载荷里指向的是别的东西。
+脚本不靠人喂代号，而是按结构识别：
+
+| 脚本 | 识别方式 |
+| --- | --- |
+| `gsonparams.py` | 找**唯一**那个「有 ≥8 个空子类」的基类 |
+| `gsonfields.py` | 找**唯一**那个「同时声明 `value()->String` 和 `alternate()->String[]`」的注解接口 |
+
+不能靠「类名存在」判断：2026-11-12 的载荷里恰好还有一个叫 `merge/f1/a` 的无关类（上一代的
+Token 名），只看名字会同时命中两代。
+
+**TypeToken 的元素类型别重推，把旧结论对齐过来。** 规则本身是：
+
+1. 实例化方法返回 `Ljava/lang/String;` → 直通 `LinkedHashMap<String,Object>`（Result 的序列化器）
+2. 否则取 host 里的 `merge/*` checkcast 目标；没有就是 host 自己
+
+但第 2 条会误判：`merge/r/b.a(String)` 里那个 checkcast 是别的 bean 用的，元素其实是 host
+`r/b` 本身；`merge/s/a`、`merge/n/f` 同理。旧表是拿真实数据验过的（97/100 出片），所以换代时用
+`align.py <旧 jar> <新 jar>`，按**结构指纹**（host 字段数 + 方法数 + 归一化后的实例化描述符，
+参数里的内部类名一律折叠成 `L*;`）把旧结论搬过去，只在旧结论是「元素 ≠ host」时才去新 host 里
+取那个唯一的 cast。脚本直接把 `signatures` 段落打出来，粘进 `gsonparams.GENERATIONS` 即可。
+
+bean 用形状找，不用猜：
+
+| bean | 判别 |
+| --- | --- |
+| Vod | 唯一「14 个 String + 1 个对象引用」的类 |
+| Style | Vod 那个对象字段的类型（String + Float） |
+| Class | 3 个 String 且**被 spider 类实例化**（另一个同形状的是自构造 builder，只在自身里 new） |
+| Result | 实例化「直通 Token」的那个 host |
+
+校验必须三层都跑，字节正确不代表运行时有效：
+
+```bash
+java SigProbe.java  <out.jar> com.github.catvod.spider.merge.m.a ...   # 反射拿到 ParameterizedType
+java -cp "<gateway.jar>;." AnnoDump  <out.jar> <注解类> <bean>          # RUNTIME 保留真的生效
+java -cp "<gateway.jar>;." FieldProbe <out.jar> <注解类> <gson类> "<bean>=a,b,c"  # 自带 Gson 真序列化
+java -cp "out;<gateway.jar>" VerifyAll <out.jar>                        # 期望 verifyError=0
+```
+
+`FieldProbe` 的 stdout 是控制台编码，中文会花，只看键名。
 
 ---
 
@@ -412,11 +477,13 @@ adb uninstall com.fm.guarddump && adb install signed.apk
 | `VerifyAll.java` | 强制 link 全部类，统计 `VerifyError` |
 | `classfile.py` | 极简 class 文件读写：往返字节一致，可追加类级 `Signature` 属性 |
 | `bytecode.py` | 指令长度表 + 线性扫描，定位「哪个方法 `new` 了某个类」「谁 `checkcast` 成什么」 |
-| `gsonparams.py` | 按证据表给 `TypeToken` 匿名子类补 `<类型参数>`，并给 `f1.a` 自己补 `<T>`（第 5.5 节） |
+| `gsonparams.py` | 按证据表给 `TypeToken` 匿名子类补 `<类型参数>`，并给 Token 基类自己补 `<T>`（第 5.5 节）。表按代分组，脚本自动认代 |
 | `SigProbe.java` | 反射层自检：直接打印 `getGenericSuperclass()` 的真实返回，字节对不代表反射可用 |
-| `gsonfields.py` | 给 bean 字段注入 `@SerializedName`（含 `@Retention(RUNTIME)` 元注解，见第 5.6 节） |
+| `gsonfields.py` | 给 bean 字段注入 `@SerializedName`（含 `@Retention(RUNTIME)` 元注解，见第 5.6 节）。同样按代分组 |
 | `AnnoDump.java` | 诊断注解类形状与 `getDeclaredAnnotations()` 是否真被 JVM 认可 |
 | `FieldProbe.java` | 用载荷自带 Gson 真实序列化，逐字段核对输出键名 |
+| `align.py` | 换代时把上一代的 `signatures` 按结构指纹搬到新载荷，并打印成可直接粘贴的表（第 5.7 节） |
+| `survey.py` | 结构体检：`token` / `annot` / `beans` / `pkg` / `find` / `sites`，用来定位注解类与四个 bean |
 | `Md5Probe.java` | 4 用例测 `Prebuilt.install` 完整性门禁：好 md5 / 篡改 / 缺失 / 非法，须 4/4 |
 
 `gsonparams.py` 是**数据级修复**：产物仍然放在 `jar/prebuilt/<源 sha256>.jvm.jar`，

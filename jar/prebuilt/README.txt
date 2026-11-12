@@ -188,6 +188,28 @@ latest.jvm.jar —— 载荷重建后的兜底（2026-11-12 新增）
         注意: 别名是权宜——新载荷那 ~3KB 差异没有跟进译码。下次换代若 API 契约变了
               会静默出空数据，此时才需要重跑 tools/wexdump（约半小时）。
 
+    9848e4d7b2d81b193ec458459d21f9cada92e0374a424a9ddaeaf440736af178
+        源: http://oss4liview.moji.com/thd_file/2026/11/12/7b563c7039830e7c712e93f27fd2e102.jpg
+            (md5 541366f5860ceb66e1c3005f5a299afe, 1043146 B)
+        产物: 1189 类 / 6045 方法，enjarify + InitAlign（rewritten=820 rejected=0
+              bridges=218，bridge ctors 208），VerifyAll verifyError=0
+              再叠 gsonparams（14 类 Signature）+ gsonfields（5 类 @SerializedName），
+              并带上 assets/libwex_v{7,8}.so
+        来由: 2026-11-12 重跑整条 dump 流水线，不再靠「别名复用旧产物」。
+              此前记的「本机已无 ARM dump 环境」是错的：SDK/emulator/adb/frida 都在，
+              只是 frida-server 需要重新下载（16.7.19 / android-x86_64）。
+        校验: <sha256>.jvm.jar.md5 = f3d712e815e6781fa59d58a378b33c30
+        验证: coverage 100/100（无产物时 10/100，逐源 ClassNotFoundException）；
+              21 个跨类目源抽样 16 个出片：
+                花卷16 玩偶120 多多208 原盘50 蜗牛48 快影208 闪电176 Libvio48
+                桔子15 虎斑208 枫叶4K84 短剧好看9 书红果30 体育飞球104
+                115分享13 虎牙直播120
+              3 个仅出分类（MyPan / AiPan1Me / 稀饭动漫），2 个空响应
+              （ChildrenAiBaoBao / MusicAiTangDou，源站侧，非翻译问题）
+        注意: 这一代首次补齐了上一代缺的类——AnimeAiGongHeGuo 实测出 24 条；
+              SoAiQuanPanGuard 不再 CNFE（home 仍为空，源站侧）。
+              latest.jvm.jar 已同步为本产物。
+
     siteconfig.json
         站点域名映射（本目录唯一的非 class 产物），来历与维护见上一节。
         ★ 运行时优先取官方链路，本文件只作兜底基线 —— 所以它过期了不会立刻出问题，
